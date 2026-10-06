@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "USTC 邮箱",
+    "description": "通过 IMAP 读取中国科学技术大学邮箱（mail.ustc.edu.cn）：发件人、主题、日期、已读状态与附件。"
+  }
+}

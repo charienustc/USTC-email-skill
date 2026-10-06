@@ -1,0 +1,22 @@
+# Never commit a mailbox password.
+# The tool keeps secrets in the OS keychain; the file below is only the fallback.
+ustc-mail-credentials*.json
+.ustc-mail-credentials.json
+*.credentials.json
+*.dpapi
+
+# Private keys
+*.pem
+*.key
+id_rsa*
+id_ed25519*
+
+# Node
+node_modules/
+
+# Editors and operating systems
+.vscode/
+.idea/
+Thumbs.db
+Desktop.ini
+*.log

@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "USTC mail",
+    "description": "Read a USTC (mail.ustc.edu.cn) mailbox over IMAP: sender, subject, date, read state, and attachments."
+  }
+}

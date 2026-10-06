@@ -1,0 +1,7 @@
+{
+  "name": "ustc-mail-skill",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Read a USTC mailbox over IMAP. Self-contained skill bundle."
+}

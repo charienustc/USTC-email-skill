@@ -1,0 +1,26 @@
+{
+  "name": "@local/ustc-mail",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Read-only USTC mailbox tools (mail.ustc.edu.cn) for the DeepSeek Harness.",
+  "icon": "./icon.svg",
+  "exports": {
+    ".": "./index.js",
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json"
+  },
+  "files": [
+    "index.js",
+    "lib",
+    "locale/*.json",
+    "icon.svg",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}
