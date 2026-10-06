@@ -1,127 +1,151 @@
-# USTC Email Skill
+<p align="center">
+  <img src="docs/assets/banner.svg" width="100%" alt="USTC Email Skill — 中国科学技术大学邮箱技能">
+</p>
 
-只读访问中国科学技术大学邮箱（`mail.ustc.edu.cn`）的 agent 技能。零第三方依赖，Windows / macOS / Linux 通用。
+<div align="center">
 
-- 技能说明：[`skill/SKILL.md`](skill/SKILL.md)
-- 可直接使用的包：[`dist/ustc-mail/`](dist/ustc-mail/)
-- 许可以：[MIT](LICENSE)
+[![平台](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-034ea1?style=flat-square)](#安装) [![Node.js](https://img.shields.io/badge/Node.js-%E2%89%A5%2018-4169e1?style=flat-square)](https://nodejs.org/) [![依赖](https://img.shields.io/badge/dependencies-0-3DA66B?style=flat-square)](#能做什么) [![测试](https://img.shields.io/badge/tests-119%20passing-3DA66B?style=flat-square)](AGENTS.md#5-测试) [![License: MIT](https://img.shields.io/badge/license-MIT-3DA66B?style=flat-square)](LICENSE)
+
+[安装](#安装) · [用法](#用法) · [凭据](#凭据) · [工作方式](#工作方式) · [文档](#文档) · [参与开发](AGENTS.md) · [问题反馈](https://github.com/charienustc/USTC-email-skill/issues/new)
+
+</div>
+
+只读访问中国科学技术大学邮箱（`mail.ustc.edu.cn`）的 agent 技能。一份可直接复制到任何 agent 的 `SKILL.md` 加一套零第三方依赖的 IMAP 实现，Windows、macOS、Linux 通用。
+
+> [!NOTE]
+> 全程只读：邮箱用 `EXAMINE` 打开、正文用 `BODY.PEEK` 取，代码里没有 STORE、COPY、EXPUNGE、APPEND，也没有 SMTP。**不会把邮件标记为已读，不会删除，不会发送，不下载附件。** 附件只列文件名、类型和大小。
 
 ## 能做什么
 
-- **列出**邮件：发件人、主题、日期、已读状态、大小、有无附件
-- **搜索**：按主题 / 发件人 / 收件人 / 日期 / 未读，中文直接可用
-- **读取**某一封的正文和附件清单
-- **`--preview`**：给整个列表附上正文片段，用来做汇总
-
-**只读**：每次都用 `EXAMINE` 打开、`BODY.PEEK` 取内容，代码里没有 STORE / COPY / EXPUNGE / APPEND，也不会标记已读、删除或发送。附件只列名字和大小，不下载。
+| | 能力 | 说明 |
+| --- | --- | --- |
+| 📬 | **列出邮件** | 最新 N 封的信封信息：发件人、主题、日期、已读状态、大小、有无附件 |
+| 🔎 | **搜索** | 按主题、发件人、收件人、日期区间、未读筛选；中文直接用 `CHARSET UTF-8` 发给服务器 |
+| 📖 | **读取正文** | 按 `uid` 读出正文与附件清单；HTML-only 的邮件自动转纯文本 |
+| ⚡ | **正文片段** | `--preview` 给整个列表附上每封的正文开头，**在同一条连接里完成**，用来做汇总 |
+| 🔒 | **只读** | 协议层就不具备写能力，不是靠约定 |
+| 🔑 | **凭据** | 按平台自动选系统钥匙串，无钥匙串时回退权限 600 的文件 |
+| 📦 | **可移植** | 技能自带代码、自己定位目录，复制到任何 agent 或操作系统即可用 |
+| 🧩 | **零依赖** | 全部用 Node 内置模块实现，包括 IMAP4rev1 客户端本身 |
 
 ## 安装
 
-需要 Node 18+。把 `dist/ustc-mail/` 整个目录复制到你的 agent 技能目录：
+1. 需要 **Node.js 18 或更高**（本机已有则跳过）。
+2. 把 [`dist/ustc-mail/`](dist/ustc-mail/) 整个目录复制到你的 agent 技能目录：
+
+   ```sh
+   # DSH
+   cp -r dist/ustc-mail "$DSH_HOME/skills/ustc-mail"
+
+   # Claude Code 及同类
+   cp -r dist/ustc-mail ~/.claude/skills/ustc-mail
+   ```
+
+3. 录入凭据（**需要你自己在终端里跑**，agent 无法代答）：
+
+   ```sh
+   node bin/setup-credentials.mjs
+   ```
+
+`SKILL.md` 会自己定位所在目录，**放在哪里都能用**，不会因为换个路径就失效。
+
+> [!TIP]
+> 不想用预构建的包，可以克隆本仓后自己构建：`node tools/build-skill.mjs` 产出 `dist/ustc-mail`，`--check` 检查产物是否与源码一致，`--install` 顺带装进技能目录。
+
+## 用法
 
 ```sh
-# DSH
-cp -r dist/ustc-mail "$DSH_HOME/skills/ustc-mail"
-
-# Claude Code 及同类
-cp -r dist/ustc-mail ~/.claude/skills/ustc-mail
+node bin/ustc-mail.mjs list --limit 20                            # 最新 20 封
+node bin/ustc-mail.mjs search --subject 账单 --since 2026-09-01    # 按主题和时间搜
+node bin/ustc-mail.mjs read 1691663063                            # 读某一封的正文
+node bin/ustc-mail.mjs list --limit 20 --preview 200               # 带正文片段，汇总用
 ```
 
-`SKILL.md` 会自己定位所在目录，放在哪里都能用。
-
-从源码重新构建：
-
-```sh
-node tools/build-skill.mjs            # 产出 dist/ustc-mail
-node tools/build-skill.mjs --check    # 检查产物是否与源码一致
-```
-
-## 快速开始
-
-```sh
-node bin/setup-credentials.mjs                        # 输入账号和客户端授权码（关回显）
-node bin/ustc-mail.mjs list --limit 20                # 最新 20 封
-node bin/ustc-mail.mjs search --subject 账单           # 按主题搜
-node bin/ustc-mail.mjs read 1691663063                # 读正文
-```
-
-## 命令
-
-| 命令 | 说明 |
+| 命令 | 参数 |
 | --- | --- |
-| `list` | 最新邮件。`--limit`（1–100）、`--unread`、`--preview`（0–600） |
-| `search` | 按条件搜。`--subject` `--from` `--to` `--since` `--before` `--unread`，**至少给一个** |
-| `read <uid>` | 读一封。`--max-chars`（500–200000） |
+| `list` | `--limit`（1–100）、`--unread`、`--preview`（0–600） |
+| `search` | `--subject` `--from` `--to` `--since` `--before` `--unread`，**至少给一个** |
+| `read <uid>` | `--max-chars`（500–200000） |
 
-三者都支持 `--folder`（默认 `INBOX`，中文名可用）和 `--json`；`--help` 看全部。
+三者都支持 `--folder`（默认 `INBOX`，中文文件夹名可用）和 `--json`；`--help` 看全部。
 
-`read` 的 `uid` 来自 `list` 或 `search`，所以流程是先列/搜、再读。
+`read` 的 `uid` 只能从 `list` 或 `search` 得到，所以流程是先列或搜、再读。
 
-**每次调用都是一条新的 IMAP 连接**（约 0.3–3 秒，与邮件大小无关），所以粗筛请用 `--preview`：
-
-```sh
-# 好：一条连接拿 20 封的片段
-node bin/ustc-mail.mjs list --limit 20 --preview 200
-
-# 差：20 条连接
-node bin/ustc-mail.mjs read <uid>   # × 20
-```
+> [!IMPORTANT]
+> **每次调用都是一条新的 IMAP 连接**（含 TLS 握手，约 0.3–3 秒，与邮件大小无关）。所以粗筛要用 `--preview`，把 `read` 留给真正要细看的少数几封：5 封分别读约 2.7 秒，一条 `list --preview` 只要 0.5 秒。
 
 ## 凭据
 
-按顺序查找：配置 → 环境变量 → **系统钥匙串** → `~/.dsh/ustc-mail-credentials.json`（权限 600）。
+按顺序查找：插件配置 → 环境变量 → **当前系统的钥匙串** → `~/.dsh/ustc-mail-credentials.json`（权限 600）。
 
-| 平台 | 钥匙串 |
-| --- | --- |
-| Windows | 凭据管理器（条目 `USTC-Mail`） |
-| macOS | 钥匙串（服务名 `USTC-Mail`） |
-| Linux | Secret Service（需要 `secret-tool`） |
+| 平台 | 钥匙串 | 在哪里查看或删除 |
+| --- | --- | --- |
+| Windows | 凭据管理器 | 控制面板 → 凭据管理器 → Windows 凭据 |
+| macOS | 钥匙串 | 钥匙串访问.app |
+| Linux | Secret Service（需要 `secret-tool`） | GNOME/KDE 的「密码与密钥」 |
+| 任意平台 | 兜底：权限 600 的文件 | 直接编辑 `~/.dsh/ustc-mail-credentials.json` |
 
-没有钥匙串的机器（比如无桌面的服务器）**会静默跳过那一层**，直接用文件，不会因此失败。
+**没有钥匙串的机器（例如无桌面的 Linux 服务器）会静默跳过那一层**，直接用文件，不会因此失败。
 
 ```sh
 node bin/setup-credentials.mjs            # 录入：关回显，保存前校验账号，保存后验证登录
-node bin/setup-credentials.mjs --show     # 看凭据来自哪里（不显示密码）
+node bin/setup-credentials.mjs --show     # 查看凭据来源（不显示密码）
 node bin/setup-credentials.mjs --remove   # 忘掉已保存的凭据
 ```
 
-账号若开了二次验证，密码要填邮箱设置里生成的**客户端授权码**。
+账号若开了二次验证，口令要填邮箱设置里生成的**客户端授权码**。
 
-> Windows 上另有一个可选图形弹窗：`windows-extra\setup-credentials-gui.ps1`，它只是薄壳，逻辑仍在上面这个 `.mjs`。
+> [!WARNING]
+> 钥匙串和权限 600 的文件都能挡住离线副本和同机器的其他账户，但**挡不住以你的身份运行的程序**——这是本机存储的固有限制。另外不要把授权码放进用户级环境变量：环境变量会继承给每个子进程，比文件传播得更广。
 
-## 项目结构
+Windows 另有一个可选的图形弹窗 `windows-extra\setup-credentials-gui.ps1`，它只是薄壳，校验与存储逻辑仍在那份 `.mjs` 里。
 
-```
-skill/SKILL.md            技能源文件（位置无关，不写死绝对路径）
-bin/ustc-mail.mjs         命令行入口
-bin/setup-credentials.mjs 跨平台凭据录入
-lib/                      实现：IMAP 客户端、MIME、钥匙串、渲染
-test/                     离线测试，不需要账号
-tools/build-skill.mjs     打包 / 检查 / 安装
-dist/ustc-mail/           构建产物，可直接复制使用
-windows-extra/            仅 Windows 的可选图形壳
-index.js + cordis.patch.yml   插件形态（未安装，保留以保持两条路同步）
-```
+## 工作方式
 
-## 开发
+技能本身不含代码，而是告诉 agent **该跑哪条命令**。真正的实现是一套零依赖的 Node 程序，两条入口共用同一个核心：
 
-```sh
-node test/self-test.mjs          # 80 项：协议与端到端（跑在假 IMAP 服务器上）
-node test/check-credentials.mjs  # 21 项：凭据层
-node test/check-bundle.mjs       # 18 项：可移植包
+```mermaid
+flowchart TD
+    Skill["SKILL.md<br/>技能说明（位置无关）"] --> CLI["bin/ustc-mail.mjs<br/>命令行入口"]
+    CLI --> Core["lib/ 共享核心<br/>IMAP 客户端 · MIME 解析 · 渲染"]
+    CLI --> Key["lib/keychain.js<br/>系统钥匙串 · 600 文件兜底"]
+    Core --> Server["mail.ustc.edu.cn:993<br/>IMAP4rev1 over TLS"]
+    Plugin["index.js<br/>插件形态（未安装）"] --> Core
 ```
 
-全部离线。改动顺序：改 `lib/` 和 `bin/` → 跑测试 → 改 `skill/SKILL.md` → `node tools/build-skill.mjs --install`。
+一次汇总请求的过程——粗筛只用一条连接，只有少数几封才单独展开：
 
-## 已知限制
+```mermaid
+sequenceDiagram
+    participant U as 用户
+    participant A as agent
+    participant C as ustc-mail.mjs
+    participant M as 邮箱服务器
+    U->>A: 这周有什么重要的邮件？
+    A->>C: search --since … --before … --preview 200
+    C->>M: EXAMINE + UID SEARCH + BODY.PEEK
+    M-->>C: 候选邮件与正文片段
+    C-->>A: 一条连接返回全部候选
+    A->>C: read（只挑要紧的几封）
+    C->>M: BODY.PEEK
+    A-->>U: 分组汇总
+```
 
-- 不能下载附件、发信、标记已读、移动或删除
-- HTML 正文转纯文本是粗略的，会丢样式、表格布局和图片
-- 搜索是**子串匹配**，只搜头部字段，没有正则 / `OR` / `NOT`
-- 日期按**服务器内部日期**算，`--before` 不含当天
-- `--preview` 的片段压成一行，且只用于判断要不要细看，**不能代替 `read`**
+`EXAMINE` 让服务器强制只读，`BODY.PEEK` 在语法上就不会设置 `\Seen`——**只读是协议保证的，不是靠 agent 自觉。**
 
-## 更多文档
+## 文档
 
-- [安全说明](docs/SECURITY.md) —— 审计结果、威胁模型、残余风险
-- [开发与验证](docs/DEVELOPMENT.md) —— 实测记录、测试覆盖、设计取舍、故障排查
+| 文档 | 内容 |
+| --- | --- |
+| [docs/README.md](docs/README.md) | 文档总入口 |
+| [docs/FEATURES.md](docs/FEATURES.md) | 能力清单、使用条件与已知限制 |
+| [docs/BACKLOG.md](docs/BACKLOG.md) | 当前问题、功能计划与待验收事项 |
+| [docs/SECURITY-AUDIT-2026-10-06.md](docs/SECURITY-AUDIT-2026-10-06.md) | 安全审计、威胁模型与残余风险 |
+| [docs/VERIFICATION.md](docs/VERIFICATION.md) | 真机验证记录与测试覆盖 |
+| [AGENTS.md](AGENTS.md) | 参与开发：仓库布局、改动流程、安全规则 |
+
+## 许可
+
+本仓代码采用 **MIT**，见 [LICENSE](LICENSE)。可自由使用、修改、分发，甚至闭源商用，只需保留版权声明——这正是它做成可移植技能的目的。
+
+本项目的实现全部自行完成，**不含任何第三方库**。
