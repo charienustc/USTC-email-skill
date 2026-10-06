@@ -29,6 +29,7 @@ const DIST = path.join(ROOT, 'dist', 'ustc-mail');
  */
 const FILES = [
   ['skill/SKILL.md', 'SKILL.md'],
+  ['LICENSE', 'LICENSE'],
   ['bin/ustc-mail.mjs', 'bin/ustc-mail.mjs'],
   ['bin/setup-credentials.mjs', 'bin/setup-credentials.mjs'],
   // The Windows keychain backend shells out to this; harmless elsewhere.
@@ -65,6 +66,7 @@ const BUNDLE_PACKAGE_JSON = `${JSON.stringify({
   version: '1.0.0',
   private: true,
   type: 'module',
+  license: 'MIT',
   description: 'Read a USTC mailbox over IMAP. Self-contained skill bundle.',
 }, null, 2)}\n`;
 

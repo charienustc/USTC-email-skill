@@ -3,5 +3,6 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
+  "license": "MIT",
   "description": "Read a USTC mailbox over IMAP. Self-contained skill bundle."
 }

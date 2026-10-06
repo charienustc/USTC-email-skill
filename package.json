@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "license": "MIT",
   "description": "Read-only USTC mailbox tools (mail.ustc.edu.cn) for the DeepSeek Harness.",
   "icon": "./icon.svg",
   "exports": {

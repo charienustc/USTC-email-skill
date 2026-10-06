@@ -390,3 +390,12 @@ node test\self-test.mjs        # 72 项，含 11 项专门的安全断言
 - ✅ **可移植包**：`node tools/build-skill.mjs` 产出 `dist/ustc-mail`，自带代码、位置无关，复制到任何 agent / 操作系统即可用；测试断言包里无绝对路径、无平台绑定文件。
 
 > 加功能时的顺序建议：先改 `bin\ustc-mail.mjs` + `lib\`，跑 `node test\self-test.mjs`，再更新 skill 里的命令说明。**全程不需要动 profile。**
+
+---
+
+## 12. 许可
+
+**MIT**，见 [LICENSE](LICENSE)。
+
+你可以自由使用、修改、分发，甚至闭源商用，只要保留版权声明。这意味着**这个包可以被复制到任何 agent、任何操作系统、任何项目里**——这正是它做成可移植技能的目的。
+
