@@ -525,16 +525,17 @@ class ImapSession {
   }
 
   /**
-   * Fetch one body section, optionally capped at `maxBytes`.
+   * Fetch one body section, optionally a byte range of it.
    *
    * `BODY.PEEK` never sets `\Seen`, so reading a message leaves it unread.
    * @param uid - the message UID.
    * @param section - an IMAP section path such as `1` or `2.1`.
    * @param maxBytes - byte cap for a partial fetch; 0 fetches the whole section.
+   * @param offset - first byte of the range, for fetching a large part in pieces.
    * @returns the raw section value, or undefined when the server returned none.
    */
-  async uidFetchSection(uid, section, maxBytes = 0) {
-    const partial = maxBytes > 0 ? `<0.${maxBytes}>` : '';
+  async uidFetchSection(uid, section, maxBytes = 0, offset = 0) {
+    const partial = maxBytes > 0 ? `<${offset}.${maxBytes}>` : '';
     const result = await this.command([
       'UID',
       'FETCH',

@@ -15,12 +15,31 @@ import { pathToFileURL } from 'node:url';
 import { TOOLS } from '../lib/tool-schema.js';
 
 /** One representative value per tool, shaped like the real result. */
+const READ_MESSAGE = {
+  mailbox: 'INBOX',
+  uid: 12,
+  subject: 'hello',
+  from: 'a@b.c',
+  to: 'me@mail.ustc.edu.cn',
+  cc: '',
+  date: '2026-10-06T01:15:00.000Z',
+  messageId: '<m@ustc.edu.cn>',
+  unread: true,
+  size: 2048,
+  bodyType: 'text/plain',
+  bodyCharset: 'UTF-8',
+  bodyTruncated: false,
+  body: 'body text',
+  attachments: [{ filename: 'a.pdf', contentType: 'application/pdf', size: 20 }],
+};
+
 const SAMPLES = {
   list: {
     mailbox: 'INBOX',
     exists: 2,
     matched: 2,
     returned: 1,
+    preview: 0,
     messages: [{
       uid: 12,
       subject: 'hello',
@@ -37,6 +56,7 @@ const SAMPLES = {
     exists: 2,
     matched: 1,
     returned: 1,
+    preview: 200,
     messages: [{
       uid: 12,
       subject: 'hello',
@@ -45,24 +65,16 @@ const SAMPLES = {
       unread: false,
       size: 2048,
       hasAttachments: true,
+      preview: 'the opening of the body',
     }],
   },
-  read: {
+  read: READ_MESSAGE,
+  readMany: {
     mailbox: 'INBOX',
-    uid: 12,
-    subject: 'hello',
-    from: 'a@b.c',
-    to: 'me@mail.ustc.edu.cn',
-    cc: '',
-    date: '2026-10-06T01:15:00.000Z',
-    messageId: '<m@ustc.edu.cn>',
-    unread: true,
-    size: 2048,
-    bodyType: 'text/plain',
-    bodyCharset: 'UTF-8',
-    bodyTruncated: false,
-    body: 'body text',
-    attachments: [{ filename: 'a.pdf', contentType: 'application/pdf', size: 20 }],
+    requested: 3,
+    returned: 2,
+    missing: [99],
+    messages: [READ_MESSAGE, { ...READ_MESSAGE, uid: 13 }],
   },
 };
 

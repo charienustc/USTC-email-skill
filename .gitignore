@@ -11,6 +11,10 @@ ustc-mail-credentials*.json
 id_rsa*
 id_ed25519*
 
+# Where `attach` writes by default. Downloading somebody's mail into the
+# repository is one keystroke away, so the directory is ignored outright.
+ustc-mail-attachments/
+
 # Node
 node_modules/
 

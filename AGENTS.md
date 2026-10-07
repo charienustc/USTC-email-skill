@@ -22,7 +22,7 @@ USTC Email Skill 是一个只读访问中国科大邮箱的 agent 技能：一�
 | 路径 | 内容 |
 | --- | --- |
 | `skill/SKILL.md` | **技能源文件**。位置无关，用 `<skill>` 相对定位；这是 agent 真正读的文档 |
-| `bin/ustc-mail.mjs` | 命令行入口：`list` / `search` / `read`，参数解析与渲染选择 |
+| `bin/ustc-mail.mjs` | 命令行入口：`list` / `search` / `read` / `attach`，参数解析与渲染选择 |
 | `bin/setup-credentials.mjs` | 跨平台凭据录入：关回显、保存前校验账号、保存后验证登录 |
 | `bin/credential-store.ps1` | Windows 钥匙串后端（`CredRead`/`CredWrite` 的 P/Invoke），**纯 ASCII** |
 | `lib/imap.js` | 自己写的 IMAP4rev1 客户端：TLS、literal、modified UTF-7、响应读取 |
@@ -32,6 +32,7 @@ USTC Email Skill 是一个只读访问中国科大邮箱的 agent 技能：一�
 | `lib/credentials.js` | 凭据解析顺序：配置 → 环境变量 → 钥匙串 → 600 文件 |
 | `lib/list.js` `lib/search.js` `lib/read.js` | 三个动作本身，与调用方式解耦 |
 | `lib/preview.js` | 在已开的连接里给整个列表附正文片段 |
+| `lib/attach.js` | 保存附件：文件名重建、分块取件、落盘与大小上限 |
 | `lib/format.js` | 模型可见文本的渲染 |
 | `lib/gate.js` | 进程级并发闸门（最多 3 个会话） |
 | `lib/args.js` | 参数校验，三处共用，避免各自漂移 |
@@ -93,13 +94,13 @@ node tools/build-skill.mjs --install <dir>   # 装到指定目录
 全部离线，不需要账号、不需要网络：
 
 ```bash
-node test/self-test.mjs          # 80 项：纯函数 + 端到端（跑在假 IMAP 服务器上）
+node test/self-test.mjs          # 95 项：纯函数 + 端到端（跑在假 IMAP 服务器上）
 node test/check-credentials.mjs  # 21 项：凭据层
 node test/check-bundle.mjs       # 18 项：可移植包
 node test/check-schema.mjs "<path to dsh-tools/lib/index.js>"   # 可选：用 DSH 的校验器复核插件 schema
 ```
 
-合计 119 项。**改动后必须全绿**；`check-bundle.mjs` 会先构建再比对，所以它也能发现忘记重新构建的 `dist/`。
+合计 134 项。**改动后必须全绿**；`check-bundle.mjs` 会先构建再比对，所以它也能发现忘记重新构建的 `dist/`。
 
 覆盖范围与真机验证记录见 [docs/VERIFICATION.md](docs/VERIFICATION.md)。
 
@@ -110,7 +111,9 @@ node test/check-schema.mjs "<path to dsh-tools/lib/index.js>"   # 可选：用 D
 - **不提交、不打印任何凭据**：邮箱授权码、令牌、私钥。凭据只存在于系统钥匙串或权限 600 的文件里，**任何情况下都不进仓库**。提交前用 `git diff --cached` 复核。
 - **不读取、不复述用户的授权码**。需要检查时只看长度与来源，**不看内容**。
 - **不替用户跑 `bin/setup-credentials.mjs`**：它需要交互终端，而且不该由 AI 经手口令。发现凭据缺失时，让用户自己运行。
-- **不许破坏只读性**。任何情况下都不得引入 `STORE`、`COPY`、`MOVE`、`EXPUNGE`、`APPEND`、`SELECT`（读写打开）或 SMTP。邮箱一律用 `EXAMINE` 打开，正文一律用 `BODY.PEEK`。**这是这个项目对用户的承诺，不是可选项。**
+- **不许破坏邮箱的只读性**。任何情况下都不得引入 `STORE`、`COPY`、`MOVE`、`EXPUNGE`、`APPEND`、`SELECT`（读写打开）或 SMTP。邮箱一律用 `EXAMINE` 打开，正文一律用 `BODY.PEEK`。**这是这个项目对用户的承诺，不是可选项。**（`attach` 写的是本地磁盘，邮箱一样不动。）
+- **附件名是外部数据，一律重建后再落盘**。发件人能控制这个名字，所以 `safeFileName` 只取最后一段、替换路径分隔符与控制字符、给 Windows 保留名加前缀；写出前还要再校验目标确实在指定目录内。**新增任何写文件的代码都必须走同一条净化路径**，不许直接拼路径。
+- **不要给插件加会写文件的工具**。`attach` 刻意只在 CLI / 技能形态提供：写文件应当由命令行加显式目标目录来做，而不是由一个本来只读的工具集悄悄落盘。`test/self-test.mjs` 里 `plugin: nothing in the tool set writes` 就是守这条的。
 - **不许关掉 TLS 校验**。`rejectUnauthorized: true` 必须放在配置展开之后；自定义 CA 可以传，校验不能关。
 - **不许把凭据写进命令行参数**（进程列表可见）。macOS 的 `security` 命令有这个固有妥协，已记录在审计里；新增代码不得再引入同类问题。
 - **推送、打标签、改仓库设置前先征得负责人同意。**

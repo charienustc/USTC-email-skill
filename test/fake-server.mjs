@@ -177,7 +177,8 @@ export async function startFakeServer(options) {
             .map((entry) => Number.parseInt(entry, 10))
             .filter((entry) => Number.isInteger(entry));
           const items = splitAt < 0 ? '' : query.slice(splitAt + 1);
-          const requested = /BODY(?:\.PEEK)?\[([^\]]*)\](?:<0\.(\d+)>)?/i.exec(items);
+          // `<start.length>` is the byte range form; `<0.length>` is the same thing.
+          const requested = /BODY(?:\.PEEK)?\[([^\]]*)\](?:<(\d+)\.(\d+)>)?/i.exec(items);
           const section = requested === null ? '' : requested[1];
 
           // A non-header section means a body-part fetch, one message at a time.
@@ -189,9 +190,12 @@ export async function startFakeServer(options) {
             }
             const source = message.sections?.[section] ?? '';
             const full = Buffer.isBuffer(source) ? source : Buffer.from(source, 'utf8');
-            const limit = requested[2] === undefined ? 0 : Number.parseInt(requested[2], 10);
-            const body = limit > 0 && limit < full.length ? full.subarray(0, limit) : full;
-            const partial = limit > 0 ? '<0>' : '';
+            const start = requested[2] === undefined ? 0 : Number.parseInt(requested[2], 10);
+            const limit = requested[3] === undefined ? 0 : Number.parseInt(requested[3], 10);
+            const from = Math.min(start, full.length);
+            const to = limit > 0 ? Math.min(from + limit, full.length) : full.length;
+            const body = full.subarray(from, to);
+            const partial = limit > 0 ? `<${start}>` : '';
             socket.write(
               `* 1 FETCH (UID ${message.uid} BODY[${section}]${partial} {${body.length}}\r\n`,
             );

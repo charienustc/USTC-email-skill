@@ -6,13 +6,14 @@
  */
 import assert from 'node:assert/strict';
 import { getEventListeners } from 'node:events';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 
 import { apply, inject } from '../index.js';
 import { findTextPart, listAttachments, parseBodyStructure } from '../lib/bodystructure.js';
-import { renderMailboxList, renderMessage, renderSearchResult, formatDateTime, formatSize } from '../lib/format.js';
+import { renderMailboxList, renderMessage, renderMessages, renderSearchResult, renderAttachmentSave, formatDateTime, formatSize } from '../lib/format.js';
 import {
   MAX_CONCURRENT_SESSIONS,
   acquireSessionSlot,
@@ -37,7 +38,8 @@ import {
   normalizeBytes,
   parseHeaderBlock,
 } from '../lib/mime.js';
-import { normalizeReadArgs, readMessage } from '../lib/read.js';
+import { normalizeReadArgs, normalizeReadManyArgs, readMessage, readMessages, MULTI_DEFAULT_MAX_CHARS } from '../lib/read.js';
+import { downloadAttachments, normalizeAttachArgs, safeFileName } from '../lib/attach.js';
 import { attachPreviews, MAX_PREVIEW_CHARS } from '../lib/preview.js';
 import {
   buildSearchCommand,
@@ -49,6 +51,7 @@ import {
 import {
   LIST_TOOL_NAME,
   READ_TOOL_NAME,
+  READ_MANY_TOOL_NAME,
   SEARCH_TOOL_NAME,
   TOOLS,
 } from '../lib/tool-schema.js';
@@ -261,15 +264,26 @@ function registeredTool(config, name) {
   return found;
 }
 
-check('plugin: registers exactly the three documented tools', () => {
+check('plugin: registers exactly the documented tools', () => {
   const names = registeredTools({}).map((tool) => tool.name);
-  assert.deepEqual(names, [LIST_TOOL_NAME, SEARCH_TOOL_NAME, READ_TOOL_NAME]);
+  assert.deepEqual(names, [LIST_TOOL_NAME, SEARCH_TOOL_NAME, READ_TOOL_NAME, READ_MANY_TOOL_NAME]);
   // Every tool carries a real description and an object-rooted output schema.
   for (const tool of registeredTools({})) {
     assert.ok(tool.description.length > 40);
     assert.equal(tool.output.schema.type, 'object');
     assert.equal(typeof tool.output.render, 'function');
     assert.equal(tool.isConcurrencySafe(), true);
+  }
+});
+
+check('plugin: nothing in the tool set writes', () => {
+  // Downloading attachments writes files, so it is deliberately CLI-only. If a
+  // tool ever appears that can write, this is the assertion that must change
+  // consciously rather than by accident.
+  assert.equal(TOOLS.length, 4);
+  assert.deepEqual(TOOLS.map((tool) => tool.operation), ['list', 'search', 'read', 'readMany']);
+  for (const tool of TOOLS) {
+    assert.equal(/attach|download|save|write/i.test(tool.name), false, `${tool.name} looks like a writer`);
   }
 });
 
@@ -293,6 +307,11 @@ check('plugin: each tool exposes exactly the documented arguments', () => {
     ['folder', 'maxChars', 'uid'],
   );
   assert.deepEqual(registeredTool({}, READ_TOOL_NAME).parameters.required, ['uid']);
+  assert.deepEqual(
+    Object.keys(registeredTool({}, READ_MANY_TOOL_NAME).parameters.properties).sort(),
+    ['folder', 'maxChars', 'uids'],
+  );
+  assert.deepEqual(registeredTool({}, READ_MANY_TOOL_NAME).parameters.required, ['uids']);
 });
 
 check('plugin: output schemas required exactly what a result carries', () => {
@@ -687,6 +706,73 @@ const READ_FIXTURES = [
 const readServer = await startFakeServer({ user: USER, password: PASSWORD, messages: READ_FIXTURES });
 const readBase = { ...base, port: readServer.port };
 
+// ---------------------------------------------------------------- attachments
+//
+// The filenames here are the attack surface: a message chooses its own, and this
+// client is the only thing standing between that choice and the filesystem.
+
+/**
+ * Escape a value for an IMAP quoted string.
+ *
+ * Without this a backslash in a fixture is consumed as an escape by the parser,
+ * so `C:\Windows\...` would reach the client as `C:Windows...` and the test
+ * would prove nothing about backslash traversal.
+ * @param value - the raw string.
+ * @returns the value as it must appear inside quotes.
+ */
+function imapQuoted(value) {
+  return String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
+/** Build a one-part attachment message whose section content is `bytes`. */
+function attachmentFixture(uid, filename, bytes, { encoding = 'BASE64' } = {}) {
+  const payload = encoding === 'BASE64'
+    ? Buffer.from(bytes).toString('base64')
+    : Buffer.from(bytes).toString('latin1');
+  const quoted = imapQuoted(filename);
+  const structure = `("APPLICATION" "OCTET-STREAM" ("NAME" "${quoted}") NIL NIL "${encoding}" `
+    + `${payload.length} NIL ("ATTACHMENT" ("FILENAME" "${quoted}")) NIL NIL)`;
+  return {
+    uid,
+    seen: true,
+    size: payload.length + 200,
+    structure,
+    headers: makeHeaders([
+      'From: sender@example.edu.cn',
+      `Subject: attachment ${uid}`,
+      'Date: Tue, 6 Oct 2026 09:15:00 +0800',
+    ]),
+    sections: { 1: payload },
+  };
+}
+
+const PDF_BYTES = Buffer.from('%PDF-1.4\nfake pdf payload\n%%EOF\n', 'latin1');
+const HOSTILE_BYTES = Buffer.from('ssh-rsa AAAA hostile payload', 'latin1');
+
+const ATTACH_FIXTURES = [
+  attachmentFixture(301, 'report.pdf', PDF_BYTES),
+  attachmentFixture(302, '../../.ssh/id_rsa', HOSTILE_BYTES),
+  attachmentFixture(303, 'C:\\Windows\\System32\\evil.dll', HOSTILE_BYTES),
+  attachmentFixture(304, 'CON.txt', HOSTILE_BYTES),
+  attachmentFixture(305, `${'long'.repeat(60)}.pdf`, PDF_BYTES),
+  {
+    uid: 306,
+    seen: true,
+    size: 500,
+    structure: '("TEXT" "PLAIN" ("CHARSET" "UTF-8") NIL NIL "7BIT" 4 1 NIL NIL NIL NIL)',
+    headers: makeHeaders([
+      'From: sender@example.edu.cn',
+      'Subject: no attachments',
+      'Date: Tue, 6 Oct 2026 09:15:00 +0800',
+    ]),
+    sections: { 1: 'body text' },
+  },
+];
+
+const attachServer = await startFakeServer({ user: USER, password: PASSWORD, messages: ATTACH_FIXTURES });
+const attachBase = { ...base, port: attachServer.port };
+const sandbox = mkdtempSync(path.join(os.tmpdir(), 'ustc-attach-'));
+
 await checkAsync('readMessage: picks the plain part and decodes quoted-printable', async () => {
   const value = await readMessage({ ...readBase, folder: 'INBOX', uid: 201 });
   assert.equal(value.uid, 201);
@@ -827,7 +913,175 @@ await checkAsync('preview argument: a body that cannot be read does not lose the
   assert.equal(records[1].preview, 'ok');
 });
 
-// ------------------------------------------------------------------- searching
+// ---------------------------------------------------------------- multi-read
+
+/** @returns how many LOGIN commands the read server has seen. */
+const readLogins = () => readServer.state.commands.filter((line) => /^[^\s]+ LOGIN/i.test(line)).length;
+
+await checkAsync('readMessages: several uids over one connection, in the order asked', async () => {
+  const before = readLogins();
+  const value = await readMessages({ ...readBase, folder: 'INBOX', uids: [203, 201, 202] });
+  assert.equal(readLogins() - before, 1, 'a batch read must open exactly one connection');
+  assert.equal(value.requested, 3);
+  assert.equal(value.returned, 3);
+  assert.deepEqual(value.missing, []);
+  assert.deepEqual(value.messages.map((message) => message.uid), [203, 201, 202]);
+  assert.equal(value.messages[0].body, '测试邮件');
+  assert.equal(value.messages[1].body, PLAIN_BODY);
+  assert.match(value.messages[2].body, /Hello world/);
+});
+
+await checkAsync('readMessages: a uid that is not there does not lose the batch', async () => {
+  const value = await readMessages({ ...readBase, folder: 'INBOX', uids: [201, 999999, 202] });
+  assert.equal(value.requested, 3);
+  assert.equal(value.returned, 2);
+  assert.deepEqual(value.missing, [999999]);
+  assert.deepEqual(value.messages.map((message) => message.uid), [201, 202]);
+  assert.match(renderMessages(value), /Not in this mailbox: 999999/);
+});
+
+await checkAsync('readMessages: every message keeps the shape a single read produces', async () => {
+  const value = await readMessages({ ...readBase, folder: 'INBOX', uids: [201] });
+  const single = await readMessage({ ...readBase, folder: 'INBOX', uid: 201 });
+  assert.deepEqual(value.messages[0], single);
+});
+
+check('normalizeReadManyArgs: bounds, types, and repeats', () => {
+  const many = normalizeReadManyArgs({ uids: [5, 3, 5, 1] });
+  assert.deepEqual(many.uids, [5, 3, 1], 'repeats are fetched once');
+  assert.equal(many.maxChars, MULTI_DEFAULT_MAX_CHARS, 'a batch gets the smaller per-message budget');
+
+  assert.equal(normalizeReadManyArgs({ uids: [5] }).maxChars, 20000, 'one uid keeps the full budget');
+  assert.equal(normalizeReadManyArgs({ uids: [5, 6], maxChars: 4000 }).maxChars, 4000);
+
+  assert.throws(() => normalizeReadManyArgs({}), /non-empty array/);
+  assert.throws(() => normalizeReadManyArgs({ uids: [] }), /non-empty array/);
+  assert.throws(() => normalizeReadManyArgs({ uids: [0] }), /positive integer/);
+  assert.throws(() => normalizeReadManyArgs({ uids: [1.5] }), /positive integer/);
+  assert.throws(() => normalizeReadManyArgs({ uids: ['1'] }), /positive integer/);
+  assert.throws(() => normalizeReadManyArgs({ uids: Array.from({ length: 21 }, (_, i) => i + 1) }), /at most 20/);
+  assert.throws(() => normalizeReadManyArgs({ uids: [1], maxChars: 100 }), /"maxChars" must be an integer/);
+});
+
+// ------------------------------------------------------------------ attach
+
+await checkAsync('downloadAttachments: writes the attachment and reports it', async () => {
+  const out = path.join(sandbox, 'plain');
+  const value = await downloadAttachments({ ...attachBase, folder: 'INBOX', uid: 301, outDir: out });
+  assert.equal(value.requested, 1);
+  assert.equal(value.saved.length, 1);
+  assert.equal(value.saved[0].filename, 'report.pdf');
+  assert.equal(value.saved[0].bytes, PDF_BYTES.length);
+  assert.deepEqual(readFileSync(path.join(out, 'report.pdf')), PDF_BYTES, 'bytes must survive the round trip');
+});
+
+await checkAsync('downloadAttachments: a filename cannot escape the directory', async () => {
+  const out = path.join(sandbox, 'hostile');
+  const value = await downloadAttachments({ ...attachBase, folder: 'INBOX', uid: 302, outDir: out });
+  assert.equal(value.saved[0].filename, 'id_rsa', 'only the leaf name survives');
+  assert.deepEqual(readFileSync(path.join(out, 'id_rsa')), HOSTILE_BYTES);
+
+  // Nothing may land beside the directory either.
+  assert.deepEqual(readdirSync(sandbox).sort(), ['hostile', 'plain'].sort());
+  assert.equal(existsSync(path.join(sandbox, '.ssh')), false);
+});
+
+await checkAsync('downloadAttachments: a Windows path and a reserved name are defused', async () => {
+  const out = path.join(sandbox, 'windows');
+  const one = await downloadAttachments({ ...attachBase, folder: 'INBOX', uid: 303, outDir: out });
+  assert.equal(one.saved[0].filename, 'evil.dll');
+
+  const two = await downloadAttachments({ ...attachBase, folder: 'INBOX', uid: 304, outDir: out });
+  assert.equal(two.saved[0].filename, '_CON.txt', 'a device name must not be created as-is');
+});
+
+await checkAsync('downloadAttachments: a very long name is truncated but keeps its extension', async () => {
+  const out = path.join(sandbox, 'long');
+  const value = await downloadAttachments({ ...attachBase, folder: 'INBOX', uid: 305, outDir: out });
+  assert.ok(value.saved[0].filename.length <= 120, `name was ${value.saved[0].filename.length} characters`);
+  assert.ok(value.saved[0].filename.endsWith('.pdf'), 'the extension must survive truncation');
+});
+
+await checkAsync('downloadAttachments: a second save does not overwrite the first', async () => {
+  const out = path.join(sandbox, 'collide');
+  await downloadAttachments({ ...attachBase, folder: 'INBOX', uid: 301, outDir: out });
+  const again = await downloadAttachments({ ...attachBase, folder: 'INBOX', uid: 301, outDir: out });
+  assert.equal(again.saved[0].filename, 'report-1.pdf');
+  assert.deepEqual(readdirSync(out).sort(), ['report-1.pdf', 'report.pdf']);
+});
+
+await checkAsync('downloadAttachments: a message with no attachments saves nothing', async () => {
+  const out = path.join(sandbox, 'none');
+  const value = await downloadAttachments({ ...attachBase, folder: 'INBOX', uid: 306, outDir: out });
+  assert.equal(value.requested, 0);
+  assert.deepEqual(value.saved, []);
+  assert.match(renderAttachmentSave(value), /no attachments/i);
+});
+
+await checkAsync('downloadAttachments: an unknown uid reports IMAP_NOT_FOUND', async () => {
+  await assert.rejects(
+    () => downloadAttachments({ ...attachBase, folder: 'INBOX', uid: 999999, outDir: path.join(sandbox, 'x') }),
+    (error) => error.code === 'IMAP_NOT_FOUND',
+  );
+});
+
+await checkAsync('downloadAttachments: --name and --index narrow the set', async () => {
+  const out = path.join(sandbox, 'narrow');
+  const none = await downloadAttachments({
+    ...attachBase, folder: 'INBOX', uid: 301, outDir: out, name: 'not-there.pdf',
+  });
+  assert.equal(none.requested, 0);
+  assert.deepEqual(none.saved, []);
+
+  const byName = await downloadAttachments({
+    ...attachBase, folder: 'INBOX', uid: 301, outDir: out, name: 'report.pdf',
+  });
+  assert.equal(byName.saved.length, 1);
+
+  const byIndex = await downloadAttachments({
+    ...attachBase, folder: 'INBOX', uid: 301, outDir: out, index: 1,
+  });
+  assert.equal(byIndex.saved.length, 1);
+
+  const offTheEnd = await downloadAttachments({
+    ...attachBase, folder: 'INBOX', uid: 301, outDir: out, index: 9,
+  });
+  assert.equal(offTheEnd.requested, 0);
+});
+
+check('normalizeAttachArgs: validates the request before anything connects', () => {
+  assert.equal(normalizeAttachArgs({ uid: 7 }).outDir, 'ustc-mail-attachments');
+  assert.equal(normalizeAttachArgs({ uid: 7, outDir: 'x' }).outDir, 'x');
+  assert.throws(() => normalizeAttachArgs({}), /positive integer/);
+  assert.throws(() => normalizeAttachArgs({ uid: 0 }), /positive integer/);
+  assert.throws(() => normalizeAttachArgs({ uid: 7, name: '   ' }), /non-empty string/);
+  assert.throws(() => normalizeAttachArgs({ uid: 7, index: 0 }), /"index" must be an integer/);
+});
+
+check('safeFileName: every hostile shape is defused', () => {
+  assert.equal(safeFileName('report.pdf'), 'report.pdf');
+  assert.equal(safeFileName('../../.ssh/id_rsa'), 'id_rsa');
+  assert.equal(safeFileName('..\\..\\evil.exe'), 'evil.exe');
+  assert.equal(safeFileName('/etc/passwd'), 'passwd');
+  assert.equal(safeFileName('C:\\Windows\\System32\\evil.dll'), 'evil.dll');
+  assert.equal(safeFileName('CON'), '_CON');
+  assert.equal(safeFileName('nul.pdf'), '_nul.pdf');
+  assert.equal(safeFileName('..'), 'attachment');
+  assert.equal(safeFileName('.'), 'attachment');
+  assert.equal(safeFileName('   '), 'attachment');
+  assert.equal(safeFileName(''), 'attachment');
+  assert.equal(safeFileName('....hidden'), 'hidden');
+  assert.equal(safeFileName('trailing.   '), 'trailing');
+  assert.equal(safeFileName('a<b>c:d"e|f?g*h.txt'), 'a_b_c_d_e_f_g_h.txt');
+  assert.equal(safeFileName('a\u0000b\u001fc.txt'), 'a_b_c.txt');
+  assert.ok(safeFileName(`${'x'.repeat(300)}.pdf`).length <= 120);
+
+  for (const value of ['../x', '..\\x', 'CON', '.hidden', '', '   ']) {
+    const name = safeFileName(value);
+    assert.equal(/[/\\]/.test(name), false, `${value} produced a separator`);
+    assert.equal(name.startsWith('.'), false, `${value} produced a hidden file`);
+  }
+});
 
 check('formatImapDate: converts to dd-Mmm-yyyy and rejects nonsense', () => {
   assert.equal(formatImapDate('2026-10-01'), '01-Oct-2026');

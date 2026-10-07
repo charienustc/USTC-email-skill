@@ -1,14 +1,19 @@
 /**
  * USTC mail tools for DSH.
  *
- * Three read-only tools over IMAP: list mailbox metadata, search it, and read one
- * message's text body. Nothing here downloads an attachment, changes a flag, or
- * sends anything.
+ * Four read-only tools over IMAP: list mailbox metadata, search it, read one
+ * message's text body, and read several at once. Nothing here downloads an
+ * attachment, changes a flag, or sends anything.
+ *
+ * Downloading attachments is deliberately absent: it writes files, which the
+ * skill's CLI does with an explicit destination and a sanitized filename. A tool
+ * that writes belongs behind the filesystem and permission services, not in a
+ * tool set that is otherwise read-only.
  */
 import { resolveCredentials } from './lib/credentials.js';
-import { renderMailboxList, renderMessage, renderSearchResult } from './lib/format.js';
+import { renderMailboxList, renderMessage, renderMessages, renderSearchResult } from './lib/format.js';
 import { listMailbox, normalizeListArgs } from './lib/list.js';
-import { normalizeReadArgs, readMessage } from './lib/read.js';
+import { normalizeReadArgs, normalizeReadManyArgs, readMessage, readMessages } from './lib/read.js';
 import { normalizeSearchArgs, searchMailbox } from './lib/search.js';
 import { TOOLS } from './lib/tool-schema.js';
 
@@ -23,6 +28,7 @@ const NORMALIZE = {
   list: normalizeListArgs,
   search: normalizeSearchArgs,
   read: normalizeReadArgs,
+  readMany: normalizeReadManyArgs,
 };
 
 /** Model-facing text rendering per operation. */
@@ -30,11 +36,20 @@ const RENDER = {
   list: renderMailboxList,
   search: renderSearchResult,
   read: renderMessage,
+  readMany: renderMessages,
+};
+
+/** The operation that actually runs for each tool. */
+const EXECUTE = {
+  list: listMailbox,
+  search: searchMailbox,
+  read: readMessage,
+  readMany: readMessages,
 };
 
 /**
  * Build the executor for one operation.
- * @param operation - `list`, `search`, or `read`.
+ * @param operation - `list`, `search`, `read`, or `readMany`.
  * @param settings - the loader row's configuration.
  * @returns an execute function bound to that operation.
  */
@@ -50,9 +65,7 @@ function makeExecute(operation, settings) {
       password: credentials.password,
       signal: exec.signal,
     };
-    if (operation === 'read') return readMessage({ ...connection, ...request });
-    if (operation === 'search') return searchMailbox({ ...connection, ...request });
-    return listMailbox({ ...connection, ...request });
+    return EXECUTE[operation]({ ...connection, ...request });
   };
 }
 

@@ -35,6 +35,7 @@ const FILES = [
   // The Windows keychain backend shells out to this; harmless elsewhere.
   ['bin/credential-store.ps1', 'bin/credential-store.ps1'],
   ['lib/args.js', 'lib/args.js'],
+  ['lib/attach.js', 'lib/attach.js'],
   ['lib/bodystructure.js', 'lib/bodystructure.js'],
   ['lib/credentials.js', 'lib/credentials.js'],
   ['lib/format.js', 'lib/format.js'],

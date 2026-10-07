@@ -16,17 +16,25 @@
 import process from 'node:process';
 
 import { resolveCredentials } from '../lib/credentials.js';
-import { renderMailboxList, renderMessage, renderSearchResult } from '../lib/format.js';
+import {
+  renderAttachmentSave,
+  renderMailboxList,
+  renderMessage,
+  renderMessages,
+  renderSearchResult,
+} from '../lib/format.js';
 import { listMailbox, normalizeListArgs } from '../lib/list.js';
-import { normalizeReadArgs, readMessage } from '../lib/read.js';
+import { normalizeReadArgs, normalizeReadManyArgs, readMessage, readMessages } from '../lib/read.js';
 import { normalizeSearchArgs, searchMailbox } from '../lib/search.js';
+import { DEFAULT_OUT_DIR, downloadAttachments, normalizeAttachArgs } from '../lib/attach.js';
 
 const USAGE = `Usage: node bin/ustc-mail.mjs <command> [options]
 
 Commands:
   list                       list mailbox metadata (default)
   search                     find messages by subject, sender, recipient, or date
-  read <uid>                 read one message's text body and envelope
+  read <uid> [<uid> ...]     read one or more messages' text bodies
+  attach <uid>               save a message's attachments into a directory
 
 Options:
   --folder <name>            mailbox to use (default INBOX)
@@ -41,7 +49,11 @@ Options:
   --to <text>                search: substring of a recipient
   --since <YYYY-MM-DD>       search: received on or after this date
   --before <YYYY-MM-DD>      search: received before this date
-  --max-chars <n>            read: body characters to return, 500-200000 (default 20000)
+  --max-chars <n>            read: body characters per message, 500-200000.
+                             Defaults to 20000 for one uid, 2000 for several.
+  --out <dir>                attach: directory to write into (default ${DEFAULT_OUT_DIR})
+  --name <filename>          attach: save only the attachment with this exact name
+  --index <n>                attach: save only the nth attachment, counting from 1
   --json                     print the raw structured result after the summary
   --user <address>           account name (default $USTC_MAIL_USER)
   --host <host>              server (default mail.ustc.edu.cn)
@@ -51,10 +63,12 @@ Options:
   -h, --help                 show this help
 
 search needs at least one of --subject, --from, --to, --since, --before, --unread.
+read takes at most 20 uids and opens one connection for all of them.
+attach is the only command that writes anything.
 
 Exit codes: 0 success, 1 mail or credential failure, 2 usage error.`;
 
-const COMMANDS = new Set(['list', 'search', 'read']);
+const COMMANDS = new Set(['list', 'search', 'read', 'attach']);
 
 /** Thrown for a malformed command line, which exits with code 2. */
 class UsageError extends Error {}
@@ -72,6 +86,10 @@ function parseArgs(argv) {
     unreadOnly: false,
     maxChars: undefined,
     uid: undefined,
+    uids: undefined,
+    out: undefined,
+    name: undefined,
+    index: undefined,
     json: false,
     config: {},
     search: {},
@@ -101,6 +119,9 @@ function parseArgs(argv) {
     else if (arg === '--limit') options.limit = integer();
     else if (arg === '--preview') options.preview = integer();
     else if (arg === '--max-chars') options.maxChars = integer();
+    else if (arg === '--out') options.out = next();
+    else if (arg === '--name') options.name = next();
+    else if (arg === '--index') options.index = integer();
     else if (arg === '--subject') options.search.subject = next();
     else if (arg === '--from') options.search.from = next();
     else if (arg === '--to') options.search.to = next();
@@ -118,11 +139,18 @@ function parseArgs(argv) {
     else positional.push(arg);
   }
 
+  const uid = (value) => {
+    if (!/^\d+$/.test(value)) throw new UsageError(`"${value}" is not a numeric uid.`);
+    return Number.parseInt(value, 10);
+  };
+
   if (options.command === 'read') {
-    if (positional.length === 0) throw new UsageError('read needs a uid: read <uid>.');
-    if (positional.length > 1) throw new UsageError(`read takes one uid, got ${positional.length}.`);
-    if (!/^\d+$/.test(positional[0])) throw new UsageError(`read needs a numeric uid, got "${positional[0]}".`);
-    options.uid = Number.parseInt(positional[0], 10);
+    if (positional.length === 0) throw new UsageError('read needs at least one uid: read <uid> [<uid> ...].');
+    options.uids = positional.map(uid);
+  } else if (options.command === 'attach') {
+    if (positional.length === 0) throw new UsageError('attach needs a uid: attach <uid>.');
+    if (positional.length > 1) throw new UsageError(`attach takes one uid, got ${positional.length}.`);
+    options.uid = uid(positional[0]);
   } else if (positional.length > 0) {
     throw new UsageError(`Unexpected argument "${positional[0]}".`);
   }
@@ -132,8 +160,28 @@ function parseArgs(argv) {
 
 /** Build the validated request for the selected command. */
 function buildRequest(options) {
+  if (options.command === 'attach') {
+    return normalizeAttachArgs({
+      uid: options.uid,
+      folder: options.folder,
+      outDir: options.out,
+      name: options.name,
+      index: options.index,
+    });
+  }
   if (options.command === 'read') {
-    return normalizeReadArgs({ uid: options.uid, folder: options.folder, maxChars: options.maxChars });
+    if (options.uids.length === 1) {
+      return normalizeReadArgs({
+        uid: options.uids[0],
+        folder: options.folder,
+        maxChars: options.maxChars,
+      });
+    }
+    return normalizeReadManyArgs({
+      uids: options.uids,
+      folder: options.folder,
+      maxChars: options.maxChars,
+    });
   }
   if (options.command === 'search') {
     return normalizeSearchArgs({
@@ -183,9 +231,17 @@ try {
 
   let value;
   let text;
-  if (options.command === 'read') {
-    value = await readMessage({ ...connection, ...request });
-    text = renderMessage(value);
+  if (options.command === 'attach') {
+    value = await downloadAttachments({ ...connection, ...request });
+    text = renderAttachmentSave(value);
+  } else if (options.command === 'read') {
+    if (options.uids.length === 1) {
+      value = await readMessage({ ...connection, ...request });
+      text = renderMessage(value);
+    } else {
+      value = await readMessages({ ...connection, ...request });
+      text = renderMessages(value);
+    }
   } else if (options.command === 'search') {
     value = await searchMailbox({ ...connection, ...request });
     text = renderSearchResult(value);
