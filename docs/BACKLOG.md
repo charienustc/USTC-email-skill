@@ -4,11 +4,13 @@
 
 ## 待验收：macOS 的钥匙串
 
-**Linux 已经验过了**（见下），macOS 还没有——开发机是 Windows，而 `security` 是 macOS 独有的，本机没有等价物。
+**Linux 已经验过了**（见下）。macOS 在 CI 上跑过一轮，**立刻抓到一个真 bug**：
 
-Linux 那一轮的收获：**探测到命令存在不等于服务可用**。同一件事在 macOS 上同样成立——登录钥匙串锁着时 `security` 一样在，一样会拒绝读写。写入路径现在会在失败时退回文件，所以最坏结果是凭据落在 600 文件里，而不是丢失。
+> `security find-generic-password -w` 对**含非 ASCII 字节**的密码打印的是**十六进制转储**，不是文本。存进去的 JSON 里只要有中文授权码，读回来就 `JSON.parse` 失败。
 
-尚未验证的：`security find-generic-password -w` 返回的是否恰好是存储的 JSON；`add-generic-password` / `delete-generic-password` 的退出码与错误文本；`commandExists('security', ['help'])` 是否会打开分页器；不弹 GUI 授权框时能否在无人值守环境完成写入。
+USTC 的授权码通常全是 ASCII，所以这个缺陷只在非 ASCII 时出现——**正因如此它一直没被发现**，直到 macOS runner 第一次把它跑出来。现在存的是 base64（对任何输入都是纯 ASCII），旧格式仍能读回。这正是"必须真机验证"的例证：单元测试和 Linux 都证明不了 `security` 的输出格式。
+
+尚未验证的：`add-generic-password` / `delete-generic-password` 的退出码与错误文本；`commandExists('security', ['help'])` 是否会打开分页器；**不弹 GUI 授权框时能否在无人值守环境完成写入**（CI 里是先 `security unlock-keychain` 才跑的，所以"锁着的钥匙串"这条路径没有被覆盖）。
 
 验收方法：`.github/workflows/keychain-verification.yml` 的 `macos` job（在 Actions 页手动触发），或在一台 Mac 上跑 `node test/check-credentials.mjs`。
 

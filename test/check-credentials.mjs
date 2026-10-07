@@ -15,7 +15,7 @@ import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
 import { resolveCredentials, storeCredentials, writeCredentialsFile } from '../lib/credentials.js';
-import { keychainBackend } from '../lib/keychain.js';
+import { decodeSecret, encodeSecret, keychainBackend } from '../lib/keychain.js';
 
 const SECRET = 'pw-测试-混合-9xQ';
 const ACCOUNT = 'check@mail.ustc.edu.cn';
@@ -307,6 +307,56 @@ try {
 } finally {
   rmSync(directory, { recursive: true, force: true });
 }
+
+// ------------------------------------------------ macOS keychain value encoding
+//
+// `security find-generic-password -w` prints a password holding bytes outside
+// the printable range as a hex dump rather than as text. A macOS runner found
+// this: the JSON blob holding a non-ASCII authorization code came back as hex
+// and failed to parse. Base64 keeps the stored value ASCII on every input.
+
+const ENCODING_CASES = [
+  { user: 'a@mail.ustc.edu.cn', password: 'ascii-only-secret' },
+  { user: 'check@mail.ustc.edu.cn', password: SECRET },
+  { user: 'cn@mail.ustc.edu.cn', password: '全是中文的授权码' },
+  { user: 'emoji@mail.ustc.edu.cn', password: 'pass🔑word' },
+  { user: 'quote@mail.ustc.edu.cn', password: 'has "quotes" and \\ backslash' },
+  { user: 'json@mail.ustc.edu.cn', password: '{"looks":"like json"}' },
+  { user: 'long@mail.ustc.edu.cn', password: `x${'中'.repeat(500)}` },
+];
+
+for (const credentials of ENCODING_CASES) {
+  const encoded = encodeSecret(credentials);
+  check(
+    `encodeSecret keeps ${credentials.user} printable`,
+    /^[\x20-\x7e]+$/.test(encoded),
+    `encoded to ${JSON.stringify(encoded.slice(0, 40))}`,
+  );
+  const decoded = decodeSecret(encoded);
+  check(
+    `the keychain envelope round-trips ${credentials.user}`,
+    decoded.user === credentials.user && decoded.password === credentials.password,
+    'the credential changed in the envelope',
+  );
+}
+
+const legacyItem = JSON.stringify({ user: 'old@x.cn', password: 'old-secret' });
+check(
+  'a keychain item written before the envelope still reads',
+  decodeSecret(legacyItem).password === 'old-secret',
+  'a raw-JSON item was rejected',
+);
+
+// The exact failure the macOS runner hit must stay loud rather than decode into
+// a corrupt credential.
+const hexDump = Buffer.from(legacyItem, 'utf8').toString('hex');
+let hexRejected = false;
+try {
+  decodeSecret(hexDump);
+} catch {
+  hexRejected = true;
+}
+check('a hex dump is not accepted as a credential', hexRejected, 'a hex dump decoded silently');
 
 process.stdout.write(`\n${passed} passed, ${failed} failed\n`);
 process.exit(failed === 0 ? 0 : 1);

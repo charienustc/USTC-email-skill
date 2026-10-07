@@ -24,7 +24,7 @@
  * authorization code. Each backend maps that pair onto its own shape:
  *
  *   Windows  account in the credential's user field, secret in its blob
- *   macOS    a JSON blob in the password field of a generic password item
+ *   macOS    a base64 blob in the password field of a generic password item
  *   Linux    a JSON blob as the Secret Service item's secret
  */
 import { spawnSync } from 'node:child_process';
@@ -117,6 +117,39 @@ function windowsBackend(service) {
 }
 
 /**
+ * Encode the credential pair for the macOS Keychain.
+ *
+ * `security find-generic-password -w` prints a password that contains bytes
+ * outside the printable range as a hex dump rather than as text. A JSON blob
+ * holding a non-ASCII authorization code hits that, and reading it back then
+ * fails to parse. Base64 keeps the stored value pure ASCII on every input,
+ * which the tool prints verbatim.
+ *
+ * USTC authorization codes are usually ASCII, so this only bites sometimes —
+ * which is exactly why it went unnoticed until a macOS runner tried it.
+ * @param credentials - `user` and `password`.
+ * @returns a base64 string safe to hand to the `security` tool.
+ */
+export function encodeSecret(credentials) {
+  return Buffer.from(JSON.stringify(credentials), 'utf8').toString('base64');
+}
+
+/**
+ * Decode a value the macOS Keychain returned.
+ *
+ * Items written before the base64 envelope existed hold raw JSON, and those are
+ * still read rather than discarded; a `{` is the giveaway.
+ * @param text - the value `security` printed.
+ * @returns the credential pair.
+ * @throws when the value is neither base64 JSON nor raw JSON.
+ */
+export function decodeSecret(text) {
+  const trimmed = String(text ?? '').trim();
+  if (trimmed.startsWith('{')) return JSON.parse(trimmed);
+  return JSON.parse(Buffer.from(trimmed, 'base64').toString('utf8'));
+}
+
+/**
  * macOS: a generic password in the login keychain.
  *
  * Note that `security add-generic-password` only takes the secret as an
@@ -136,7 +169,7 @@ function macosBackend(service) {
       if (!ok(result)) return undefined;
       const text = String(result.stdout ?? '').trim();
       if (text === '') return undefined;
-      return JSON.parse(text);
+      return decodeSecret(text);
     },
     write(credentials) {
       // Delete first. `-U` only updates an existing item when both the account
@@ -146,7 +179,7 @@ function macosBackend(service) {
       run(['delete-generic-password', '-s', service]);
       const result = run([
         'add-generic-password', '-a', credentials.user, '-s', service,
-        '-w', JSON.stringify(credentials),
+        '-w', encodeSecret(credentials),
       ]);
       if (!ok(result)) throw new Error(`Storing the Keychain item failed: ${String(result.stderr ?? '').trim()}`);
     },
