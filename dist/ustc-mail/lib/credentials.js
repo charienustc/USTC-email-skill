@@ -78,6 +78,54 @@ export async function writeCredentialsFile(file, credentials) {
 }
 
 /**
+ * Store credentials in the keychain, falling back to the file when it fails.
+ *
+ * A keychain backend that reports itself available is not a promise that it
+ * works: `secret-tool` is commonly installed on a headless Linux box with no
+ * session bus, and a locked macOS login keychain refuses writes. Both keep the
+ * command present and the service unreachable.
+ *
+ * Refusing the credential the user just typed would be the worst outcome, and
+ * the file fallback is right there, so a failed keychain write degrades to the
+ * file and reports why. The caller is responsible for telling the user which
+ * one actually happened — see {@link StoreOutcome}.
+ * @param options - the backend (or undefined), the file path, and the credentials.
+ * @returns where the credentials ended up, and why if the keychain was bypassed.
+ */
+export async function storeCredentials(options) {
+  const { backend, credentialsFile, credentials, keepFile = false } = options;
+
+  if (backend === undefined) {
+    await writeCredentialsFile(credentialsFile, credentials);
+    return {
+      destination: credentialsFile, fellBack: false, reason: undefined, removedFile: false,
+    };
+  }
+
+  try {
+    backend.write(credentials);
+  } catch (error) {
+    const reason = String(error?.message ?? error).trim().replace(/\s+/g, ' ');
+    await writeCredentialsFile(credentialsFile, credentials);
+    return {
+      destination: credentialsFile, fellBack: true, reason, removedFile: false,
+    };
+  }
+
+  // Only once the keychain really holds it is the plaintext copy worth removing.
+  let removedFile = false;
+  if (!keepFile && await readCredentialsFile(credentialsFile) !== undefined) {
+    const { rm } = await import('node:fs/promises');
+    await rm(credentialsFile, { force: true });
+    removedFile = true;
+  }
+
+  return {
+    destination: backend.name, fellBack: false, reason: undefined, removedFile,
+  };
+}
+
+/**
  * Report whether a credential file is readable by anyone but its owner.
  *
  * This never fails a call: it only lets the caller warn. Windows reports no

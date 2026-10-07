@@ -14,7 +14,7 @@ import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
-import { resolveCredentials, writeCredentialsFile } from '../lib/credentials.js';
+import { resolveCredentials, storeCredentials, writeCredentialsFile } from '../lib/credentials.js';
 import { keychainBackend } from '../lib/keychain.js';
 
 const SECRET = 'pw-测试-混合-9xQ';
@@ -172,6 +172,79 @@ try {
   const directRead = await resolveCredentials({ keychainService: absentService, credentialsFile: direct });
   check('writeCredentialsFile is readable by the loader', directRead.user === 'direct@x.cn', `got ${directRead.user}`);
   assert.ok(exists(direct));
+
+  // ------------------------------------------------- keychain write fallback
+  //
+  // A backend that reports itself available is not a promise that it works:
+  // `secret-tool` ships on headless Linux with no session bus, and a locked
+  // macOS login keychain refuses writes. Losing the credential the user just
+  // typed would be the worst outcome, so the write degrades to the file.
+
+  const fellBackFile = path.join(directory, 'fell-back.json');
+  const refused = {
+    name: 'a keychain that refuses',
+    write() {
+      throw new Error('Storing the Secret Service item failed: Cannot autolaunch D-Bus');
+    },
+  };
+  const outcome = await storeCredentials({
+    backend: refused,
+    credentialsFile: fellBackFile,
+    credentials: { user: 'fallback@x.cn', password: 'fallback-secret' },
+  });
+  check('a refused keychain write falls back to the file', outcome.fellBack === true, `fellBack=${outcome.fellBack}`);
+  check('the fallback names the file as the destination', outcome.destination === fellBackFile, `got ${outcome.destination}`);
+  check('the fallback reason is passed through', /autolaunch/i.test(outcome.reason ?? ''), `got ${outcome.reason}`);
+
+  const recovered = await resolveCredentials({ keychainService: absentService, credentialsFile: fellBackFile });
+  check(
+    'the credential survives a refused keychain write',
+    recovered.password === 'fallback-secret',
+    'the secret the user typed was lost',
+  );
+  if (process.platform !== 'win32') {
+    check('the fallback file is still 600', (statSync(fellBackFile).mode & 0o777) === 0o600, `mode ${(statSync(fellBackFile).mode & 0o777).toString(8)}`);
+  }
+
+  // A keychain that works must still win, and must clear the plaintext copy.
+  const keptFile = path.join(directory, 'kept.json');
+  await writeCredentialsFile(keptFile, { user: 'old@x.cn', password: 'old-secret' });
+  const writes = [];
+  const working = {
+    name: 'a keychain that works',
+    write(credentials) { writes.push(credentials); },
+  };
+  const placed = await storeCredentials({
+    backend: working,
+    credentialsFile: keptFile,
+    credentials: { user: 'new@x.cn', password: 'new-secret' },
+  });
+  check('a working keychain is the destination', placed.destination === 'a keychain that works', `got ${placed.destination}`);
+  check('a working keychain does not fall back', placed.fellBack === false, `fellBack=${placed.fellBack}`);
+  check('the credential reached the backend', writes.length === 1 && writes[0].password === 'new-secret', JSON.stringify(writes));
+  check('the stale plaintext file is removed', !exists(keptFile), 'the old file survived');
+  check('removal is reported', placed.removedFile === true, `removedFile=${placed.removedFile}`);
+
+  // --keep-file must leave the plaintext copy alone even so.
+  const keepFile = path.join(directory, 'keep.json');
+  await writeCredentialsFile(keepFile, { user: 'old@x.cn', password: 'old-secret' });
+  const kept = await storeCredentials({
+    backend: working,
+    credentialsFile: keepFile,
+    credentials: { user: 'new@x.cn', password: 'new-secret' },
+    keepFile: true,
+  });
+  check('--keep-file preserves the plaintext copy', exists(keepFile) && kept.removedFile === false, 'the file was removed anyway');
+
+  // No keychain at all is the ordinary path, not a fallback.
+  const noBackendFile = path.join(directory, 'no-backend.json');
+  const plain = await storeCredentials({
+    backend: undefined,
+    credentialsFile: noBackendFile,
+    credentials: { user: 'plain@x.cn', password: 'plain-secret' },
+  });
+  check('no keychain is not reported as a fallback', plain.fellBack === false, `fellBack=${plain.fellBack}`);
+  check('no keychain writes the file', exists(noBackendFile), 'nothing was written');
 } finally {
   rmSync(directory, { recursive: true, force: true });
 }

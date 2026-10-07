@@ -25,7 +25,7 @@ import {
   DEFAULT_CREDENTIALS_FILE,
   readCredentialsFile,
   resolveCredentials,
-  writeCredentialsFile,
+  storeCredentials,
 } from '../lib/credentials.js';
 import { DEFAULT_SERVICE, keychainBackend } from '../lib/keychain.js';
 
@@ -221,10 +221,11 @@ function readStdinLine() {
 
 /** Ask, validate, store, and check. */
 async function store(options) {
+  // A keychain that exists is not a keychain that works. `secret-tool` is often
+  // installed on a headless box with no session bus, and a locked macOS login
+  // keychain refuses writes; both keep the command present and the service
+  // unreachable. The destination is therefore decided by trying, not by asking.
   const backend = options.file ? undefined : keychainBackend({ service: options.service });
-  const destination = backend !== undefined ? backend.name : options.credentialsFile;
-
-  process.stdout.write(`存放位置: ${destination}\n\n`);
 
   let account;
   let password;
@@ -255,19 +256,24 @@ async function store(options) {
   if (password.trim() === '') throw new Error('授权码不能为空。');
 
   const credentials = { user: account, password: password.trim() };
-  if (backend !== undefined) {
-    backend.write(credentials);
-    if (!options.keepFile && await readCredentialsFile(options.credentialsFile) !== undefined) {
-      const { rm } = await import('node:fs/promises');
-      await rm(options.credentialsFile, { force: true });
-      process.stdout.write(`\n已删除旧的凭据文件 ${options.credentialsFile}\n`);
-    }
-  } else {
-    await writeCredentialsFile(options.credentialsFile, credentials);
-    process.stdout.write(`\n已写入 ${options.credentialsFile}（权限 600）\n`);
+
+  const outcome = await storeCredentials({
+    backend,
+    credentialsFile: options.credentialsFile,
+    credentials,
+    keepFile: options.keepFile,
+  });
+
+  if (outcome.fellBack) {
+    process.stdout.write(`\n无法写入 ${backend.name}：${outcome.reason}\n`);
+  }
+  const suffix = outcome.fellBack || backend === undefined ? '（权限 600）' : '';
+  process.stdout.write(`存放位置: ${outcome.destination}${suffix}\n`);
+  if (outcome.removedFile) {
+    process.stdout.write(`已删除旧的凭据文件 ${options.credentialsFile}\n`);
   }
 
-  process.stdout.write('授权码未回显，也未写入任何明文位置。\n');
+  process.stdout.write('授权码未回显。\n');
 
   if (!options.check) return 0;
 
