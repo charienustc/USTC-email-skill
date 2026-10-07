@@ -1,6 +1,6 @@
 # 验证记录
 
-核对日期：2026-10-06。开发机为 Windows x64，Node v22.20.0（完整 ICU）。
+核对日期：2026-10-07。开发机为 Windows x64，Node v22.20.0（完整 ICU）。
 
 本文件保留**真机验证记录与测试覆盖**，作为"哪些结论有证据、哪些没有"的依据。未完成项见 [BACKLOG.md](BACKLOG.md)。
 
@@ -111,23 +111,29 @@ TEXT 多出并集之外                  =  2 封
 全部离线，不需要账号或网络：
 
 ```bash
-node test/self-test.mjs          # 80 项
-node test/check-credentials.mjs  # 21 项
+node test/self-test.mjs          # 101 项
+node test/check-credentials.mjs  # 52 项（随钥匙串是否可用略变，见上）
 node test/check-bundle.mjs       # 18 项
 node test/check-schema.mjs "<path to dsh-tools/lib/index.js>"   # 可选
 ```
 
-合计 **119 项**。
+合计 **171 项**。
 
-### `self-test.mjs`（80 项，含安全断言）
+### `self-test.mjs`（101 项，含安全断言）
 
-纯函数：RFC 2047 的 B/Q 编码与 UTF-8/GBK 解码、相邻编码字之间的空白折叠、头部折行、地址与日期规整、IMAP literal 命令编码、modified UTF-7 邮箱名、括号平衡扫描、FETCH 响应解析、BODYSTRUCTURE 解析（multipart/alternative、嵌套 multipart 的点分段号、附件与内联图片判别、literal 参数里的中文文件名）、quoted-printable / base64 / GBK 正文解码、HTML→纯文本转换、搜索条件构造（`dd-Mmm-yyyy` 日期转换、ASCII 加引号、非 ASCII 转 literal 并加 `CHARSET UTF-8`、空条件拒绝）、参数校验、渲染。
+纯函数：RFC 2047 的 B/Q 编码与 UTF-8/GBK 解码、相邻编码字之间的空白折叠、头部折行、地址与日期规整、IMAP literal 命令编码、modified UTF-7 邮箱名、括号平衡扫描、FETCH 响应解析、BODYSTRUCTURE 解析（multipart/alternative、嵌套 multipart 的点分段号、附件与内联图片判别、literal 参数里的中文文件名）、quoted-printable / base64 / GBK 正文解码、HTML→纯文本转换、搜索条件构造（`dd-Mmm-yyyy` 日期转换、ASCII 加引号、非 ASCII 转 literal 并加 `CHARSET UTF-8`、空条件拒绝、**`--anywhere` 展开成 `OR SUBJECT x BODY x` 且字面量重复两次**、**任何输入都不会生成 `TEXT`**）、附件文件名的 18 种恶意形态净化、参数校验、渲染。
 
 端到端（真实客户端代码跑在假 IMAP 服务器上）：非 ASCII 密码的 literal 登录、未读过滤、limit 截断、认证失败、连不上、空邮箱、abort 监听不泄漏、按段落读正文、HTML 正文转换、附件清单、正文截断、uid 不存在、主题/发件人搜索、搜索条件与日期经线路原样发出、**会话并发上限**、`--preview` 的**单连接**与片段压行、`preview 0` 不取正文、读不到的正文不拖垮整个列表。
 
-### `check-credentials.mjs`（21 项）
+另有三块是后来补的，都针对"看着对但没验过"的地方：**多封读取**（一条连接读多个 uid、顺序、坏 uid 不拖垮整批、逐封形状与单封一致）；**附件**（打印路径穿越 / Windows 保留名 / 控制字符 / 超长名 / 纯点号共 18 种恶意文件名，超过 25 MiB 的部件在取第一个字节前就被拒，3 MiB + 12345 字节的随机数据跨 5 个分块拼接后逐字节一致，quoted-printable 的 `=41` 与软换行**各跨一次块边界**仍正确解码）；**渲染**（多封与保存附件两种新输出）。
+
+### `check-credentials.mjs`（52 项）
 
 文件写入与读回、非 ASCII 授权码往返、文件权限 600（POSIX）、钥匙串写入/读取/删除往返、**钥匙串优先于文件**、环境变量优先于两者、账号格式校验（连续两个点 / 空格 / 缺域名 / 无 @ 四种畸形全部拒绝**且不写任何文件**）、非 TTY 时给出明确指引、`--show` 不打印密码。
+
+**钥匙串在、服务不在**：套件先试一次写入再决定验什么。写成功就验往返与"二次写入是替换而非新增"；写失败就转去验回退——凭据落进 600 文件、来源诚实报告为文件、且**用户输过的授权码没有丢**。两条分支都会打印说明，所以**项数不同（50 或 54）不代表有测试被跳过**。
+
+**macOS 的存储信封**：`security find-generic-password -w` 会把含非 ASCII 字节的密码打印成十六进制转储，所以存进去的是 base64。7 组输入（纯 ASCII、中文、emoji、引号与反斜杠、看起来像 JSON 的串、超长串）验证编码后**始终是可打印 ASCII**且往返无损；旧的原样 JSON 仍能读回；**十六进制转储会被拒绝而不是解成一个看着正常的凭据**。
 
 ### `check-bundle.mjs`（18 项）
 

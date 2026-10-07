@@ -97,13 +97,13 @@ node tools/build-skill.mjs --install <dir>   # 装到指定目录
 全部离线，不需要账号、不需要网络：
 
 ```bash
-node test/self-test.mjs          # 99 项：纯函数 + 端到端（跑在假 IMAP 服务器上）
+node test/self-test.mjs          # 101 项：纯函数 + 端到端（跑在假 IMAP 服务器上）
 node test/check-credentials.mjs  # 52 项：凭据层（数目随钥匙串是否可用略变，见下）
 node test/check-bundle.mjs       # 18 项：可移植包
 node test/check-schema.mjs "<path to dsh-tools/lib/index.js>"   # 可选：用 DSH 的校验器复核插件 schema
 ```
 
-合计 169 项。**改动后必须全绿**；`check-bundle.mjs` 会先构建再比对，所以它也能发现忘记重新构建的 `dist/`。
+合计 171 项。**改动后必须全绿**；`check-bundle.mjs` 会先构建再比对，所以它也能发现忘记重新构建的 `dist/`。
 
 `check-credentials.mjs` 的项数**取决于这台机器上钥匙串能不能真的用**：能往返就多跑几项真钥匙串断言（54），只有命令没有守护进程就转去验回退（50）。**这不代表测试被跳过**，代表它在当前环境里验了能验的东西；两种情况都会打印一行说明走到了哪条分支。
 

@@ -64,7 +64,7 @@ const ALLOWED_SCRIPT = 'bin/credential-store.ps1';
  */
 const BUNDLE_PACKAGE_JSON = `${JSON.stringify({
   name: 'ustc-mail-skill',
-  version: '1.0.0',
+  version: '1.1.0',
   private: true,
   type: 'module',
   license: 'MIT',

@@ -1,6 +1,6 @@
 # 项目文档入口
 
-核对日期：2026-10-06。当前版本 1.0.0（`dist/ustc-mail/package.json`）。能力清单以 [FEATURES.md](FEATURES.md) 为准，未完成事项与已知问题以 [BACKLOG.md](BACKLOG.md) 为准。**文档描述的是源码当前状态；界面与真机行为必须实机核对，不能只凭单元测试宣称已交付。**
+核对日期：2026-10-07。当前版本 1.1.0（`dist/ustc-mail/package.json`）。能力清单以 [FEATURES.md](FEATURES.md) 为准，未完成事项与已知问题以 [BACKLOG.md](BACKLOG.md) 为准。**文档描述的是源码当前状态；界面与真机行为必须实机核对，不能只凭单元测试宣称已交付。**
 
 ## 按用途查找
 
@@ -12,6 +12,7 @@
 | 当前问题、功能计划与待验收事项 | [BACKLOG.md](BACKLOG.md) |
 | 安全审计、威胁模型与残余风险 | [SECURITY-AUDIT-2026-10-06.md](SECURITY-AUDIT-2026-10-06.md) |
 | 真机验证记录与测试覆盖 | [VERIFICATION.md](VERIFICATION.md) |
+| 手动触发的跨平台验证（macOS / Linux） | [.github/workflows/keychain-verification.yml](../.github/workflows/keychain-verification.yml) |
 | 可移植包的构建脚本 | [tools/build-skill.mjs](../tools/build-skill.mjs) |
 | 技能说明（agent 读的文档） | [skill/SKILL.md](../skill/SKILL.md) |
 

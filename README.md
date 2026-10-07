@@ -83,6 +83,8 @@ node bin/ustc-mail.mjs attach 100002 --out ./attachments           # 保存附�
 
 > [!IMPORTANT]
 > **每次调用都是一条新的 IMAP 连接**（含 TLS 握手，约 0.3–3 秒，与邮件大小无关）。所以粗筛要用 `--preview`，把 `read` 留给真正要细看的少数几封：5 封分别读约 2.7 秒，一条 `list --preview` 只要 0.5 秒。
+>
+> 要读**多封**时，把 uid 一次性交给 `read`（`read 1 2 3`）——它只在**一条连接**里全部读完，不要循环调用。
 
 ## 凭据
 
@@ -95,7 +97,7 @@ node bin/ustc-mail.mjs attach 100002 --out ./attachments           # 保存附�
 | Linux | Secret Service（需要 `secret-tool`） | GNOME/KDE 的「密码与密钥」 |
 | 任意平台 | 兜底：权限 600 的文件 | 直接编辑 `~/.dsh/ustc-mail-credentials.json` |
 
-**没有钥匙串的机器（例如无桌面的 Linux 服务器）会静默跳过那一层**，直接用文件，不会因此失败。
+**没有钥匙串的机器（例如无桌面的 Linux 服务器）会静默跳过那一层**，直接用文件，不会因此失败。**命令在、服务不在**（headless Linux 上很常见）也一样：读会静默回退，**写会在失败时退回文件并告诉你原因**，不会让你白输一遍授权码。
 
 ```sh
 node bin/setup-credentials.mjs            # 录入：关回显，保存前校验账号，保存后验证登录
