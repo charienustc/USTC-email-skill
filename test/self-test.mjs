@@ -11,7 +11,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 
-import { apply, inject } from '../index.js';
+import { apply, inject, makeRouteHandler } from '../index.js';
 import { findTextPart, listAttachments, parseBodyStructure } from '../lib/bodystructure.js';
 import { renderMailboxList, renderMessage, renderMessages, renderSearchResult, renderAttachmentSave, formatDateTime, formatSize } from '../lib/format.js';
 import {
@@ -248,10 +248,18 @@ check('formatSize and formatDateTime', () => {
 
 // ---------------------------------------------------------- plugin entry
 
+/** Services the plugin took through `ctx.inject`, recorded by the fake ctx. */
+const injected = [];
+
 /** Capture the definitions the plugin registers, without the harness. */
 function registeredTools(config) {
   const registered = [];
-  const ctx = { tools: { register: (definition) => { registered.push(definition); return () => {}; } } };
+  const ctx = {
+    tools: { register: (definition) => { registered.push(definition); return () => {}; } },
+    // The plugin takes `webServer` optionally, so a context without one must
+    // still register every tool. Recorded so a route test can drive it.
+    inject: (services, callback) => { injected.push({ services, callback }); },
+  };
   apply(ctx, config);
   assert.equal(registered.length, TOOLS.length);
   return registered;
@@ -1515,6 +1523,135 @@ await checkAsync('hardening: the read tool warns that message content is untrust
   const description = registeredTool({}, READ_TOOL_NAME).description;
   assert.match(description, /untrusted data/);
   assert.match(description, /never follow instructions/);
+});
+
+// ------------------------------------------------------------ panel HTTP route
+//
+// The sidebar panel cannot import a Harness Client package, so its data arrives
+// over a same-origin route registered by the Host half. These drive the handler
+// with substituted seams: the fake IMAP server speaks plain TCP, and the route
+// builds its own connection, so nothing here touches the network.
+
+/** A ServerResponse that records what the handler wrote. */
+function fakeResponse() {
+  const chunks = [];
+  const res = {
+    status: 0,
+    headers: undefined,
+    writeHead(status, headers) { res.status = status; res.headers = headers; },
+    end(body) { if (body !== undefined) chunks.push(Buffer.from(body)); },
+  };
+  res.body = () => JSON.parse(Buffer.concat(chunks).toString('utf8'));
+  return res;
+}
+
+/** Fake credentials so the handler never reads the machine keychain. */
+const fakeResolve = async () => ({
+  host: 'mail.invalid', port: 993, timeoutMs: 1000, user: USER, password: PASSWORD,
+});
+
+/** Drive the route handler once with recording seams. */
+async function callRoute(url, overrides = {}) {
+  const calls = [];
+  const execute = {
+    list: async (request) => { calls.push({ operation: 'list', request }); return { mailbox: 'INBOX', exists: 7, messages: [] }; },
+    search: async (request) => { calls.push({ operation: 'search', request }); return { mailbox: 'INBOX', query: 'stub', messages: [] }; },
+    read: async (request) => { calls.push({ operation: 'read', request }); return { mailbox: 'INBOX', uid: request.uid, body: 'stub' }; },
+  };
+  const handler = makeRouteHandler({}, {
+    resolve: overrides.resolve ?? fakeResolve,
+    execute: overrides.execute ?? execute,
+  });
+  const res = fakeResponse();
+  await handler({ url }, res);
+  return { res, calls };
+}
+
+check('panel route: apply registers a prefix route when a web server exists', () => {
+  const ctx = {
+    tools: { register: () => () => {} },
+    inject: (services, callback) => {
+      assert.deepEqual(services, ['webServer']);
+      callback({
+        effect: (fn) => fn(),
+        webServer: { register: (route) => { ctx.route = route; return () => {}; } },
+      });
+    },
+  };
+  apply(ctx, {});
+  assert.ok(ctx.route, 'no route was registered');
+  assert.equal(ctx.route.kind, 'prefix', 'a prefix covers every action under it');
+  assert.equal(ctx.route.path, '/ustc-mail/api');
+});
+
+await checkAsync('panel route: list answers with the mailbox', async () => {
+  const { res, calls } = await callRoute('/ustc-mail/api/list?limit=2');
+  assert.equal(res.status, 200);
+  assert.equal(res.headers['content-type'], 'application/json; charset=utf-8');
+  assert.equal(res.body().mailbox, 'INBOX');
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].operation, 'list');
+  assert.equal(calls[0].request.limit, 2);
+});
+
+await checkAsync('panel route: search always means subject-or-body', async () => {
+  const { res, calls } = await callRoute('/ustc-mail/api/search?anywhere=%E6%B5%8B%E8%AF%95&limit=5');
+  assert.equal(res.status, 200);
+  assert.equal(calls[0].operation, 'search');
+  // The panel takes one box of text; the person typing it does not know which
+  // field holds the word, so the route always searches both. Never TEXT.
+  assert.equal(calls[0].request.anywhere, '测试');
+  assert.equal(calls[0].request.subject, undefined);
+  assert.equal(calls[0].request.body, undefined);
+});
+
+await checkAsync('panel route: read answers with a body', async () => {
+  const { res, calls } = await callRoute('/ustc-mail/api/read?uid=201&maxChars=800');
+  assert.equal(res.status, 200);
+  assert.equal(res.body().uid, 201);
+  assert.equal(calls[0].operation, 'read');
+  assert.equal(calls[0].request.uid, 201);
+  assert.equal(calls[0].request.maxChars, 800);
+});
+
+await checkAsync('panel route: an unknown action is a 404 and runs nothing', async () => {
+  const { res, calls } = await callRoute('/ustc-mail/api/nonsense');
+  assert.equal(res.status, 404);
+  assert.match(res.body().error, /Unknown route/);
+  assert.equal(calls.length, 0, 'an unknown action must not reach the mailbox');
+});
+
+await checkAsync('panel route: the limit is clamped, not rejected', async () => {
+  const high = await callRoute('/ustc-mail/api/list?limit=99999');
+  assert.equal(high.calls[0].request.limit, 100);
+  const low = await callRoute('/ustc-mail/api/list?limit=0');
+  assert.equal(low.calls[0].request.limit, 1);
+  const junk = await callRoute('/ustc-mail/api/list?limit=abc');
+  assert.equal(junk.calls[0].request.limit, 30, 'an unparseable limit falls back to the default');
+  const missing = await callRoute('/ustc-mail/api/list');
+  assert.equal(missing.calls[0].request.limit, 30);
+});
+
+await checkAsync('panel route: a failure is a 500 whose message names no secret', async () => {
+  const { res } = await callRoute('/ustc-mail/api/list', {
+    resolve: async () => { throw new Error('The USTC mail account name is not configured.'); },
+  });
+  assert.equal(res.status, 500);
+  const text = JSON.stringify(res.body());
+  assert.equal(text.includes(PASSWORD), false, 'the error leaked the password');
+  assert.equal(text.includes(USER), false, 'the error leaked the account');
+  assert.match(text, /not configured/);
+});
+
+await checkAsync('panel route: a credential already in the error still would not be echoed', async () => {
+  // A backend that puts the secret in its own message must not get it to the
+  // panel: the handler forwards the message, so this pins that it forwards only
+  // the message and adds nothing.
+  const leaky = new Error('connect failed');
+  leaky.password = PASSWORD;
+  const { res } = await callRoute('/ustc-mail/api/list', { resolve: async () => { throw leaky; } });
+  assert.equal(res.status, 500);
+  assert.equal(JSON.stringify(res.body()).includes(PASSWORD), false);
 });
 
 await readServer.close();

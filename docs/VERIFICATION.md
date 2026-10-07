@@ -111,15 +111,15 @@ TEXT 多出并集之外                  =  2 封
 全部离线，不需要账号或网络：
 
 ```bash
-node test/self-test.mjs          # 101 项
+node test/self-test.mjs          # 109 项
 node test/check-credentials.mjs  # 52 项（随钥匙串是否可用略变，见上）
 node test/check-bundle.mjs       # 18 项
 node test/check-schema.mjs "<path to dsh-tools/lib/index.js>"   # 可选
 ```
 
-合计 **171 项**。
+合计 **179 项**。
 
-### `self-test.mjs`（101 项，含安全断言）
+### `self-test.mjs`（109 项，含安全断言）
 
 纯函数：RFC 2047 的 B/Q 编码与 UTF-8/GBK 解码、相邻编码字之间的空白折叠、头部折行、地址与日期规整、IMAP literal 命令编码、modified UTF-7 邮箱名、括号平衡扫描、FETCH 响应解析、BODYSTRUCTURE 解析（multipart/alternative、嵌套 multipart 的点分段号、附件与内联图片判别、literal 参数里的中文文件名）、quoted-printable / base64 / GBK 正文解码、HTML→纯文本转换、搜索条件构造（`dd-Mmm-yyyy` 日期转换、ASCII 加引号、非 ASCII 转 literal 并加 `CHARSET UTF-8`、空条件拒绝、**`--anywhere` 展开成 `OR SUBJECT x BODY x` 且字面量重复两次**、**任何输入都不会生成 `TEXT`**）、附件文件名的 18 种恶意形态净化、参数校验、渲染。
 

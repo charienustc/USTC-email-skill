@@ -37,10 +37,13 @@ USTC Email Skill 是一个只读访问中国科大邮箱的 agent 技能：一�
 | `lib/format.js` | 模型可见文本的渲染 |
 | `lib/gate.js` | 进程级并发闸门（最多 3 个会话） |
 | `lib/args.js` | 参数校验，三处共用，避免各自漂移 |
-| `index.js` + `lib/tool-schema.js` + `cordis.patch.yml` + `locale/` | **插件形态（刻意不安装）** |
+| `plugin/client.js` | **插件的 Client 半**：侧边栏图标 + 主面板。纯 JS，不 import 任何 Harness Client 包 |
+| `index.js` + `lib/tool-schema.js` + `cordis.patch.yml` + `locale/` `icon.svg` | **插件形态**（Host 半 + manifest），已安装 |
+| `tools/build-plugin.mjs` | 组装可安装的插件包到 `dist/ustc-mail-plugin/` |
 | `tools/build-skill.mjs` | 打包 / 检查 / 安装可移植包 |
 | `test/` | 全部离线测试，不需要账号 |
-| `dist/ustc-mail/` | **构建产物，会提交进仓库** |
+| `dist/ustc-mail/` | **技能构建产物，会提交进仓库** |
+| `dist/ustc-mail-plugin/` | **插件构建产物**，`plugin_manager install_bundle` 的安装源 |
 | `windows-extra/` | 仅 Windows 的可选图形壳，**不进入可移植包** |
 | `.github/workflows/` | **仅手动触发**的钥匙串验证（macOS / Linux runner），推送不跑 |
 | `docs/` | 文档入口、功能说明、待办、审计、验证记录 |
@@ -49,9 +52,13 @@ USTC Email Skill 是一个只读访问中国科大邮箱的 agent 技能：一�
 
 这个仓库存在的目的是**发布一个技能**。提交 `dist/ustc-mail/` 让访客可以直接下载可用的技能目录，不必先装 Node 再构建。代价是改完源码必须重新构建——`test/check-bundle.mjs` 会**断言产物与源码逐字节一致**，漂移了测试就红。
 
-### 为什么插件形态保留却不安装
+### 两条路的关系
 
-两条路的核心实现完全共享（`lib/` 约 1900 行），插件专属的只有 `index.js` + `lib/tool-schema.js`（约 250 行）。插件形态已被离线测试覆盖，留着可以让共享核心的改动同时受益于两条路。但当前产品**不支持插件自动更新**（升级要卸载再装），而这台机器有过装插件影响启动的经历，所以默认走技能路线。**不要擅自安装。**
+核心实现完全共享（`lib/` 约 1900 行）。技能形态多一份 `SKILL.md` 与 `bin/`，插件形态多一份 `index.js` + `lib/tool-schema.js` + `plugin/client.js`。
+
+**技能是发布路径**：零依赖、复制即用、不依赖宿主产品插件机制、不会被"插件升级要卸载再装"卡住。**插件是富交互路径**：有真正的工具与侧边栏面板，但绑在这个宿主上。两者可以并存，共享同一份钥匙串凭据。
+
+插件此前刻意不装，理由是本机有过装插件影响启动的经历。**2026-10-07 装了并验过**：`install_bundle` 返回 `application: applied`、无警告、免重启激活。**不要因为这次成功就默认以后也可以随便装**——装的版本是 `0.2.0-rc.2`，且这台机器是用户自己的环境，动它之前先问。
 
 ## 3. 日常改动流程
 
@@ -89,6 +96,15 @@ node tools/build-skill.mjs --install <dir>   # 装到指定目录
 - **不许出现本机绝对路径**。`test/check-bundle.mjs` 会扫全部文本文件，出现 `F:\...` 或 `C:\Users\...` 直接判失败。
 - **不许出现平台专属文件**，唯一例外是 `bin/credential-store.ps1`（Windows 钥匙串要用，其他平台不会加载）。
 
+**插件形态**单独构建，产物是另一份：
+
+```bash
+node tools/build-plugin.mjs          # 产出 dist/ustc-mail-plugin（24 个文件）
+node tools/build-plugin.mjs --check  # 检查它是否与源码一致
+```
+
+安装由 `plugin_manager` 的 `install_bundle` 指向该目录完成，**不要**手写 profile 的 `package.json` 或 `cordis.patch.yml`。改完 `index.js` 或 `plugin/client.js` 要重新构建；Host 半换了新代码需要重启才生效，Client 半走 HMR。
+
 没有标签、没有发布产物、**推送不跑任何自动检查**。想给别人版本，让对方克隆仓库或下载 `dist/ustc-mail/`。
 
 唯一的 workflow 是 `.github/workflows/keychain-verification.yml`，**仅手动触发**，用来在真实的 macOS 与 Linux runner 上验钥匙串（本机是 Windows，验不了 `security`）。改钥匙串代码后可以手动跑一次；它不需要任何凭据。
@@ -98,13 +114,13 @@ node tools/build-skill.mjs --install <dir>   # 装到指定目录
 全部离线，不需要账号、不需要网络：
 
 ```bash
-node test/self-test.mjs          # 101 项：纯函数 + 端到端（跑在假 IMAP 服务器上）
+node test/self-test.mjs          # 109 项：纯函数 + 端到端（跑在假 IMAP 服务器上）
 node test/check-credentials.mjs  # 52 项：凭据层（数目随钥匙串是否可用略变，见下）
 node test/check-bundle.mjs       # 18 项：可移植包
 node test/check-schema.mjs "<path to dsh-tools/lib/index.js>"   # 可选：用 DSH 的校验器复核插件 schema
 ```
 
-合计 171 项。**改动后必须全绿**；`check-bundle.mjs` 会先构建再比对，所以它也能发现忘记重新构建的 `dist/`。
+合计 179 项。**改动后必须全绿**；`check-bundle.mjs` 会先构建再比对，所以它也能发现忘记重新构建的 `dist/`。
 
 `check-credentials.mjs` 的项数**取决于这台机器上钥匙串能不能真的用**：能往返就多跑几项真钥匙串断言（54），只有命令没有守护进程就转去验回退（50）。**这不代表测试被跳过**，代表它在当前环境里验了能验的东西；两种情况都会打印一行说明走到了哪条分支。
 
@@ -123,7 +139,7 @@ node test/check-schema.mjs "<path to dsh-tools/lib/index.js>"   # 可选：用 D
 - **不许关掉 TLS 校验**。`rejectUnauthorized: true` 必须放在配置展开之后；自定义 CA 可以传，校验不能关。
 - **不许把凭据写进命令行参数**（进程列表可见）。macOS 的 `security` 命令有这个固有妥协，已记录在审计里；新增代码不得再引入同类问题。
 - **搜索里永远不要发 `TEXT` 检索键**。实测差异极大：`BODY` 与搜头部同量级（20–140 ms），`TEXT` 要 **4.7–6 秒且不缓存**；更糟的是**结果不一致**——同一个词，`SUBJECT`∪`BODY` 是 48 封，`TEXT` 只返回 36 封，**漏掉 14 封**、另有 2 封在并集之外。要"到处搜"就用 `OR SUBJECT x BODY x`（实测 48 ms，结果**精确等于**并集）。`test/self-test.mjs` 里 `never TEXT` 那组断言就是守这条的。
-- **推送、打标签、改仓库设置前先征得负责人同意。**
+- **面板的 HTTP 路由是只读的，且不得回显凭据**。它只映射到 `list` / `search` / `read` 三个只读动作；错误一律只把 `error.message` 交给面板，**不带堆栈、不带凭据**。`test/self-test.mjs` 里那两组「不泄露」断言就是守这条的。新增路由动作前先想清楚它是不是只读。
 - 改动涉及安全面时，同步更新 [docs/SECURITY-AUDIT-2026-10-06.md](docs/SECURITY-AUDIT-2026-10-06.md)。
 
 ## 7. 已知情况
@@ -133,4 +149,6 @@ node test/check-schema.mjs "<path to dsh-tools/lib/index.js>"   # 可选：用 D
 - **macOS 保存凭据的一瞬间，授权码对进程列表可见**：`security add-generic-password` 只接受命令行参数。Linux 的 `secret-tool` 从 stdin 读，没有这个问题。
 - **`--preview` 的片段是压成一行的**，且只取 `preview × 6 + 1024` 字节（上限 64 KiB）的原始载荷，所以 HTML 邮件或高比例转义的邮件，片段可能短于请求的字符数。**片段只用于判断要不要细看，不能代替 `read`。**
 - **技能与代码分处两地**：源文件在 `skill/`，实际生效的副本在 `$DSH_HOME/skills/ustc-mail/`。改完必须 `--install`，否则技能目录里还是旧的。
-- **插件形态未安装**，`list_plugins` 里不会有 `ustc_mail_*`。
+- **插件形态已安装并激活**（bundle `@local/ustc-mail@0.2.0`）。侧边栏图标 id 与主面板 key 都是 `ustc-mail`——**两者必须一致**，sidebar 靠这个 id 把按钮和面板对上。
+- **0.2.0-rc.2 上免重启激活成功**，`install_bundle` 返回 `application: applied`、无警告，Client 槽位即时出现在 live 树里。这与"装完要重启、重启又激活不了"的旧印象相反，**但不能据此说那个问题不存在**：本机装的是 `0.2.0-rc.2`，不是 0.2.8。
+- **面板数据走同源 HTTP 路由** `/ustc-mail/api/{list,search,read}`，不走 Client 服务：plain-JS 插件不允许 import Harness Client 包，而 Client 服务目录里没有任何邮件相关服务。`makeRouteHandler` 的 `resolve` / `execute` 两个接缝是为了**在没有真实服务器的情况下驱动路由**，不是为了别的。

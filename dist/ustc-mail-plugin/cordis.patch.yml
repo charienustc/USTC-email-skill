@@ -1,0 +1,13 @@
+# USTC mail tools over the shipped composition.
+#
+# The row carries only endpoint defaults; the account name and password are read
+# from the environment or from the user's own credential file, so no secret is
+# ever written into a patch. See README.md.
+
+- insert:
+    - id: ustc-mail
+      name: '@local/ustc-mail'
+      config:
+        host: mail.ustc.edu.cn
+        port: 993
+        passwordEnv: USTC_MAIL_PASS
