@@ -106,6 +106,20 @@ TEXT 多出并集之外                  =  2 封
 
 所以最终设计是：`--body`（只用 `BODY`）与 `--anywhere`（`OR SUBJECT x BODY x`）。**`TEXT` 一个字节都不发**，并在 `test/self-test.mjs` 里加了断言守住这条。
 
+### 插件侧边栏面板（2026-10-07，真机）
+
+| 项目 | 结果 |
+| --- | --- |
+| **安装** | `install_bundle` 返回 `application: applied`，`warnings: []` |
+| **免重启激活** | 装完立刻在 live 槽位树里出现，**不需要重启**。本机是 `0.2.0-rc.2`（**不是**期待修复的 0.2.8） |
+| **侧边栏入口** | `sidebar.panellist` 多出 `{ id: "ustc-mail", order: 20, active: true }`，排在已装的三个之后 |
+| **面板** | `main` 多出 `{ key: "ustc-mail", active: true }`——与侧边栏 id 相同，sidebar 靠这个配对 |
+| **数据路由** | `/ustc-mail/api/list` → 200、真实 1371 封；`/search?anywhere=日报` → 200；`/read?uid=…&maxChars=300` → 200 且**被钳到下限 500 字**；未知动作 → 404 |
+| **渲染** | **由用户目视确认**：图标出现在左侧导航栏，面板能打开。这一步之前无法自证——管理浏览器不能认证这个 GUI，而规范禁止用其他手段取截图 |
+| **禁用** | `set_bundle enabled:false` → `application: applied`、无警告；侧边栏条目从 live 树消失，`Config.listConfigs` 的 `entries` 归零。**没有半个残留注册** |
+
+**未验证**：面板在 light/dark 两种主题下与相邻宿主页面的观感对比（用户只确认了可见与可用）；macOS / Linux 上的插件激活（只在 Windows 本机装过）。
+
 ## 测试覆盖
 
 全部离线，不需要账号或网络：

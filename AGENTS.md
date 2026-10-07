@@ -149,6 +149,8 @@ node test/check-schema.mjs "<path to dsh-tools/lib/index.js>"   # 可选：用 D
 - **macOS 保存凭据的一瞬间，授权码对进程列表可见**：`security add-generic-password` 只接受命令行参数。Linux 的 `secret-tool` 从 stdin 读，没有这个问题。
 - **`--preview` 的片段是压成一行的**，且只取 `preview × 6 + 1024` 字节（上限 64 KiB）的原始载荷，所以 HTML 邮件或高比例转义的邮件，片段可能短于请求的字符数。**片段只用于判断要不要细看，不能代替 `read`。**
 - **技能与代码分处两地**：源文件在 `skill/`，实际生效的副本在 `$DSH_HOME/skills/ustc-mail/`。改完必须 `--install`，否则技能目录里还是旧的。
-- **插件形态已安装并激活**（bundle `@local/ustc-mail@0.2.0`）。侧边栏图标 id 与主面板 key 都是 `ustc-mail`——**两者必须一致**，sidebar 靠这个 id 把按钮和面板对上。
-- **0.2.0-rc.2 上免重启激活成功**，`install_bundle` 返回 `application: applied`、无警告，Client 槽位即时出现在 live 树里。这与"装完要重启、重启又激活不了"的旧印象相反，**但不能据此说那个问题不存在**：本机装的是 `0.2.0-rc.2`，不是 0.2.8。
+- **插件形态已安装但当前处于禁用状态**（bundle `@local/ustc-mail@0.2.0`）。用户看过、确认面板渲染正常，然后选择先禁用、以后再细做。**要恢复用 `set_bundle enabled:true`**，不必重装。
+- **禁用是干净撤下的**：`set_bundle` 返回 `application: applied`、无警告；侧边栏条目从 live 槽位树消失，Host 侧 `Config.listConfigs` 的 `entries` 归零。**没有留下半个注册**——`ctx.slots.inject` 的清理是真的。
+- **侧边栏图标 id 与主面板 key 都是 `ustc-mail`**——**两者必须一致**，sidebar 靠这个 id 把按钮和面板对上。改其中一个而不改另一个，图标会点不出面板。
+- **0.2.0-rc.2 上免重启激活成功**：`install_bundle` 返回 `application: applied`、无警告，Client 槽位即时出现在 live 树里。这与"装完要重启、重启又激活不了"的旧印象相反，**但不能据此说那个问题不存在**：本机装的是 `0.2.0-rc.2`，不是 0.2.8。
 - **面板数据走同源 HTTP 路由** `/ustc-mail/api/{list,search,read}`，不走 Client 服务：plain-JS 插件不允许 import Harness Client 包，而 Client 服务目录里没有任何邮件相关服务。`makeRouteHandler` 的 `resolve` / `execute` 两个接缝是为了**在没有真实服务器的情况下驱动路由**，不是为了别的。
