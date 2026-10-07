@@ -1,0 +1,84 @@
+# Keychain verification on the platforms this machine is not.
+#
+# Windows is the development machine, so the macOS and Linux backends in
+# lib/keychain.js were written from documentation and could only be exercised
+# through fakes. This workflow runs the offline suites on real runners.
+#
+# Manual only, on purpose: this repository deliberately has no CI that fires on
+# every push. Run it from the Actions tab when the keychain code changes.
+#
+# No credentials are needed. Every suite is offline — the mail tests run against
+# a fake IMAP server, and the credential tests use throwaway keychain items and
+# temporary files.
+name: keychain verification
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  macos:
+    name: macOS keychain (security)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Report the keychain situation
+        run: |
+          echo "security: $(command -v security)"
+          security list-keychains || true
+          security default-keychain || true
+          security show-keychain-info ~/Library/Keychains/login.keychain-db 2>&1 || true
+
+      - name: Unlock the login keychain
+        # The runner's keychain password is empty; unlocking here means the
+        # round-trip assertions run rather than the fallback ones.
+        run: security unlock-keychain -p "" ~/Library/Keychains/login.keychain-db || echo "unlock failed; the fallback path will be checked instead"
+
+      - name: Offline suites
+        run: |
+          node test/self-test.mjs
+          node test/check-bundle.mjs
+
+      - name: Credential suite
+        run: node test/check-credentials.mjs
+
+  linux:
+    name: Linux Secret Service (secret-tool)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install a keyring
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libsecret-tools gnome-keyring
+
+      - name: Offline suites
+        run: |
+          node test/self-test.mjs
+          node test/check-bundle.mjs
+
+      - name: Credential suite with no secret service running
+        # secret-tool is installed but nothing answers on the bus, which is the
+        # headless case that used to fail outright. The suite must detect it,
+        # skip the round trip, and prove the credential still lands in the file.
+        run: node test/check-credentials.mjs
+
+      - name: Credential suite against a real secret service
+        run: |
+          dbus-run-session -- bash -c '
+            set -e
+            printf "\n" | gnome-keyring-daemon --unlock --components=secrets --daemonize >/dev/null 2>&1
+            sleep 3
+            secret-tool lookup service USTC-Mail-Workflow >/dev/null 2>&1 || true
+            node test/check-credentials.mjs
+          '

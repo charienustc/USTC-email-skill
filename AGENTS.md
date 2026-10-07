@@ -12,7 +12,7 @@ USTC Email Skill 是一个只读访问中国科大邮箱的 agent 技能：一�
 | --- | --- | --- | --- |
 | 本仓 | `github.com/charienustc/USTC-email-skill` | `main` | 技能、实现、测试、可移植包、文档 |
 
-- **日常改动直接提交到 `main` 并推送**，不开分支、不开 MR。这个仓库没有 CI 与回执机制。
+- **日常改动直接提交到 `main` 并推送**，不开分支、不开 MR。**推送不触发任何自动检查**——唯一的 workflow（`.github/workflows/keychain-verification.yml`）是 `workflow_dispatch`，只在需要验 macOS / Linux 钥匙串时手动跑。所以推送前必须自己把 §5 跑完。
 - 提交信息写清**为什么**改，而不只是改了什么。
 - 推送前必须跑完 [§5 测试](#5-测试)，全绿才算完成。
 - 改动涉及 `skill/` 或 `lib/` 时，**必须重新构建可移植包**（见 §4），否则 `dist/` 会与源码漂移。
@@ -41,6 +41,7 @@ USTC Email Skill 是一个只读访问中国科大邮箱的 agent 技能：一�
 | `test/` | 全部离线测试，不需要账号 |
 | `dist/ustc-mail/` | **构建产物，会提交进仓库** |
 | `windows-extra/` | 仅 Windows 的可选图形壳，**不进入可移植包** |
+| `.github/workflows/` | **仅手动触发**的钥匙串验证（macOS / Linux runner），推送不跑 |
 | `docs/` | 文档入口、功能说明、待办、审计、验证记录 |
 
 ### 为什么 `dist/` 也提交
@@ -87,20 +88,24 @@ node tools/build-skill.mjs --install <dir>   # 装到指定目录
 - **不许出现本机绝对路径**。`test/check-bundle.mjs` 会扫全部文本文件，出现 `F:\...` 或 `C:\Users\...` 直接判失败。
 - **不许出现平台专属文件**，唯一例外是 `bin/credential-store.ps1`（Windows 钥匙串要用，其他平台不会加载）。
 
-没有标签、没有发布产物、没有 CI。想给别人版本，让对方克隆仓库或下载 `dist/ustc-mail/`。
+没有标签、没有发布产物、**推送不跑任何自动检查**。想给别人版本，让对方克隆仓库或下载 `dist/ustc-mail/`。
+
+唯一的 workflow 是 `.github/workflows/keychain-verification.yml`，**仅手动触发**，用来在真实的 macOS 与 Linux runner 上验钥匙串（本机是 Windows，验不了 `security`）。改钥匙串代码后可以手动跑一次；它不需要任何凭据。
 
 ## 5. 测试
 
 全部离线，不需要账号、不需要网络：
 
 ```bash
-node test/self-test.mjs          # 95 项：纯函数 + 端到端（跑在假 IMAP 服务器上）
-node test/check-credentials.mjs  # 21 项：凭据层
+node test/self-test.mjs          # 99 项：纯函数 + 端到端（跑在假 IMAP 服务器上）
+node test/check-credentials.mjs  # 36 项：凭据层（数目随钥匙串是否可用略变，见下）
 node test/check-bundle.mjs       # 18 项：可移植包
 node test/check-schema.mjs "<path to dsh-tools/lib/index.js>"   # 可选：用 DSH 的校验器复核插件 schema
 ```
 
-合计 134 项。**改动后必须全绿**；`check-bundle.mjs` 会先构建再比对，所以它也能发现忘记重新构建的 `dist/`。
+合计 150 项以上。**改动后必须全绿**；`check-bundle.mjs` 会先构建再比对，所以它也能发现忘记重新构建的 `dist/`。
+
+`check-credentials.mjs` 的项数**取决于这台机器上钥匙串能不能真的用**：能往返就多跑几项真钥匙串断言（38），只有命令没有守护进程就转去验回退（34）。**这不代表测试被跳过**，代表它在当前环境里验了能验的东西；两种情况都会打印一行说明走到了哪条分支。
 
 覆盖范围与真机验证记录见 [docs/VERIFICATION.md](docs/VERIFICATION.md)。
 
@@ -121,7 +126,8 @@ node test/check-schema.mjs "<path to dsh-tools/lib/index.js>"   # 可选：用 D
 
 ## 7. 已知情况
 
-- **macOS 与 Linux 的钥匙串代码没有在真机验证过**（开发机是 Windows）。逻辑有测试覆盖，探测不到会静默退回文件，不会挂；但首次在真机使用可能需要调整。见 [docs/BACKLOG.md](docs/BACKLOG.md)。
+- **Linux 的钥匙串已在真机验证**（WSL Ubuntu 24.04，含真实 `gnome-keyring-daemon` 往返，38 项全过）。**macOS 仍未在真机验证**：开发机是 Windows，而 `security` 是 macOS 独有。用 `gh workflow run keychain-verification.yml` 或直接在一台 Mac 上跑 `node test/check-credentials.mjs`。见 [docs/BACKLOG.md](docs/BACKLOG.md)。
+- **钥匙串"可用"不等于"能用"**：`secret-tool` 常在没有 session bus 的 headless 机器上被装上。读会静默回退，**写会在失败时退回文件并说明原因**。新增凭据写入代码必须走 `storeCredentials`（`lib/credentials.js`），不要直接调 `backend.write`。
 - **macOS 保存凭据的一瞬间，授权码对进程列表可见**：`security add-generic-password` 只接受命令行参数。Linux 的 `secret-tool` 从 stdin 读，没有这个问题。
 - **`--preview` 的片段是压成一行的**，且只取 `preview × 6 + 1024` 字节（上限 64 KiB）的原始载荷，所以 HTML 邮件或高比例转义的邮件，片段可能短于请求的字符数。**片段只用于判断要不要细看，不能代替 `read`。**
 - **技能与代码分处两地**：源文件在 `skill/`，实际生效的副本在 `$DSH_HOME/skills/ustc-mail/`。改完必须 `--install`，否则技能目录里还是旧的。

@@ -1,18 +1,27 @@
 # 待办
 
-更新于 2026-10-06。1.0.0 已可发布：技能包、跨平台凭据、119 项离线测试与真机验证均已完成。这里保留**尚未验收的行为**与**未做的功能**；"测试通过"不等于真机验收完成。
+更新于 2026-10-07。这里保留**尚未验收的行为**与**未做的功能**；"测试通过"不等于真机验收完成。
 
-## 待验收：macOS 与 Linux 的钥匙串
+## 待验收：macOS 的钥匙串
 
-**开发机是 Windows，这两个平台的钥匙串代码从未在真机运行过。**
+**Linux 已经验过了**（见下），macOS 还没有——开发机是 Windows，而 `security` 是 macOS 独有的，本机没有等价物。
 
-已完成的：`lib/keychain.js` 里两个 backend 按各自的命令行接口实现；`keychainBackend()` 在探测不到时返回 `undefined` 而不是抛错，因此**缺少钥匙串的机器会退回权限 600 的文件，不会失败**；文件兜底路径与解析顺序有 21 项测试覆盖。
+Linux 那一轮的收获：**探测到命令存在不等于服务可用**。同一件事在 macOS 上同样成立——登录钥匙串锁着时 `security` 一样在，一样会拒绝读写。写入路径现在会在失败时退回文件，所以最坏结果是凭据落在 600 文件里，而不是丢失。
 
-尚未验证的：`security find-generic-password` 与 `secret-tool lookup` 在真实系统上的**输出格式与退出码**；macOS 上 `-w` 返回的是否恰好是存储的 JSON；Linux 上无桌面会话（没有 session bus）时 `secret-tool` 的实际行为；`commandExists` 用的探测参数（`security help`、`secret-tool --help`）是否在对应发行版上都立即退出。
+尚未验证的：`security find-generic-password -w` 返回的是否恰好是存储的 JSON；`add-generic-password` / `delete-generic-password` 的退出码与错误文本；`commandExists('security', ['help'])` 是否会打开分页器；不弹 GUI 授权框时能否在无人值守环境完成写入。
 
-边界：**不能因为测试全绿就认为跨平台已经交付。** 真机跑通前，README 里"三平台通用"指的是**代码路径**，不是**已验证**。
+验收方法：`.github/workflows/keychain-verification.yml` 的 `macos` job（在 Actions 页手动触发），或在一台 Mac 上跑 `node test/check-credentials.mjs`。
 
-验收方法：在 macOS 与一台带桌面的 Linux 上各跑一次 `node bin/setup-credentials.mjs`（录入 + 自动验证登录）与 `--show`，再在无桌面的 Linux 上确认自动退回文件。
+### Linux 的验证结论（2026-10-07）
+
+在 WSL Ubuntu 24.04 上用**免 sudo** 的方式装出 Node 22 与 `secret-tool`，两种情形各跑一遍完整凭据套件：
+
+| 情形 | 结果 |
+| --- | --- |
+| `secret-tool` 存在、**没有** Secret Service 守护进程 | 34 项全过。套件检测到"存在但不可用"，跳过往返检查，转而验证回退：凭据落进 600 文件、来源诚实报告为文件而不是冒充钥匙串 |
+| `gnome-keyring-daemon` 起在私有 session bus 上（真实 Secret Service） | **38 项全过**，含钥匙串往返、加载器偏好、以及"第二次写入是替换而非新增" |
+
+Linux 上曾有过一个真缺陷，就是这一轮发现的：可用性探测只看 `secret-tool` 二进制在不在，于是 headless 机器上后端自称可用、写入时抛错，**用户存不了凭据**。现已改为写入失败退回文件。
 
 ## 待验收：真实 IMAP 服务器的边界行为
 

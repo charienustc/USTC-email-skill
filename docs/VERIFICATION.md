@@ -41,7 +41,23 @@
 | **批量默认正文上限** | 10 封一条连接 106 ms；正文最长 792 字符，**10 封无一触到 2000 上限**——默认值对通知类邮件够用 |
 | **可移植性** | 把 `dist/ustc-mail` 复制到无关目录后，`--help` / 真机列表 / `--show` 全部正常，且包内不含任何本机绝对路径 |
 
-**未验证**：macOS 与 Linux 的钥匙串（见 [BACKLOG](BACKLOG.md)）；真实服务器上的超大 literal 与不结束行。
+**未验证**：macOS 的钥匙串（见 [BACKLOG](BACKLOG.md)）；真实服务器上的超大 literal 与不结束行。
+
+### Linux 的钥匙串（2026-10-07，真机）
+
+在 WSL Ubuntu 24.04 上验的，**免 sudo**：Node 用官方静态包解到家目录，`secret-tool` 用 `apt-get download` + `dpkg -x` 解出来。这样在本机就能拿到真实 Linux，不必等 CI。
+
+| 项目 | 结果 |
+| --- | --- |
+| **命令存在但服务不在** | `secret-tool` 装上了、`keychainBackend()` 报告可用，但 D-Bus 上没人应答：`The name org.freedesktop.secrets was not provided by any .service files`。**这正是 headless 机器的真实情形** |
+| **读取软失败** | 同一条件下 `backend.read()` 返回 `undefined`，加载器继续往下找文件 |
+| **写入回退** | 34 项全过。套件打印 `keychain: present but unusable — …`，跳过往返断言，转而验证凭据落进 600 文件、且来源诚实报告为文件而非冒充钥匙串 |
+| **真实 Secret Service 往返** | 用 `dbus-run-session` + `gnome-keyring-daemon` 起了一个真的，**38 项全过** |
+| 钥匙串往返 | 存进去的账号与授权码原样取回，`--show` 也认到它 |
+| 加载器偏好 | 钥匙串优先于同目录下的诱饵文件（诱饵内容没有被采用） |
+| **替换而非新增** | 连存两次（换账号）后只剩一项，删一次就干净——`clear` 再 `store` 的做法在真实实现上成立 |
+
+第一次跑的时候**套件自己崩了**：`check-credentials.mjs` 直接调 `backend.write()`，把"后端可用"当成"后端能用"，和产品代码犯了一样的错。现在套件先试一次写入来判断该验往返还是验回退，两种情况都会打印走到了哪条分支——**项数不同（34 或 38）不代表有测试被跳过**。
 
 ## 测试覆盖
 

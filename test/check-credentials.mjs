@@ -125,6 +125,11 @@ try {
   check('--show never prints the secret', !shown.stdout.includes(SECRET), 'the secret appeared in --show output');
 
   // ---------------------------------------------------------------- keychain
+  //
+  // A backend that reports itself available is not a promise that it works.
+  // On a headless Linux box `secret-tool` is often installed with no session
+  // bus behind it, and a locked macOS keychain refuses writes, so this block
+  // decides what it can test by trying, and otherwise checks the fallback.
 
   const backend = keychainBackend({ service: 'USTC-Mail-Check-Probe' });
   if (backend === undefined) {
@@ -134,35 +139,89 @@ try {
     const target = keychainBackend({ service });
     check('a keychain backend is available', target !== undefined, 'the probe found one but the item lookup did not');
 
+    let usable = false;
+    let unusableReason = '';
     try {
       target.write({ user: ACCOUNT, password: SECRET });
-      const read = target.read();
-      check('the keychain returns the account', read?.user === ACCOUNT, `got ${read?.user}`);
-      check('the keychain returns the secret', read?.password === SECRET, 'the secret did not round-trip intact');
-
-      const fromKeychain = await resolveCredentials({ keychainService: service, credentialsFile: absentFile });
-      check(
-        'the loader prefers the keychain',
-        fromKeychain.passwordSource === target.name,
-        `got ${fromKeychain.passwordSource}`,
-      );
-
-      // The keychain must outrank a file that is also present.
-      const decoy = path.join(directory, 'decoy.json');
-      writeFileSync(decoy, JSON.stringify({ user: 'decoy@x.cn', password: 'decoy' }), 'utf8');
-      const decoyed = await resolveCredentials({ keychainService: service, credentialsFile: decoy });
-      check('the keychain outranks the file', decoyed.user === ACCOUNT, `got ${decoyed.user}`);
-    } finally {
-      check('the keychain item can be removed', target.remove() === true, 'remove reported failure');
+      usable = true;
+    } catch (error) {
+      unusableReason = String(error.message ?? error).trim().replace(/\s+/g, ' ');
     }
 
-    const afterRemove = await resolveCredentials({ keychainService: service, credentialsFile: absentFile })
-      .then(() => 'resolved', (error) => error.message);
-    check(
-      'a removed keychain item is gone',
-      String(afterRemove).includes('not configured'),
-      `got ${afterRemove}`,
-    );
+    if (!usable) {
+      // A real environment where the command exists and the service does not.
+      process.stdout.write(`keychain: present but unusable — ${unusableReason}\n`);
+      process.stdout.write('keychain: round-trip checks skipped; checking the fallback instead\n');
+
+      const probeFile = path.join(directory, 'unusable-keychain.json');
+      const outcome = await storeCredentials({
+        backend: target,
+        credentialsFile: probeFile,
+        credentials: { user: ACCOUNT, password: SECRET },
+      });
+      check('an unusable keychain falls back to the file', outcome.fellBack === true, `fellBack=${outcome.fellBack}`);
+      check('the fallback reports the keychain error', outcome.reason === unusableReason, `got ${outcome.reason}`);
+
+      const stored = await resolveCredentials({ keychainService: service, credentialsFile: probeFile });
+      check(
+        'the credential survives an unusable keychain',
+        stored.password === SECRET && stored.user === ACCOUNT,
+        'the credential the user typed was lost',
+      );
+      check(
+        'an unusable keychain does not claim to be the source',
+        stored.passwordSource === probeFile,
+        `got ${stored.passwordSource}`,
+      );
+      if (process.platform !== 'win32') {
+        check(
+          'the fallback file is 600',
+          (statSync(probeFile).mode & 0o777) === 0o600,
+          `mode ${(statSync(probeFile).mode & 0o777).toString(8)}`,
+        );
+      }
+    } else {
+      try {
+        const read = target.read();
+        check('the keychain returns the account', read?.user === ACCOUNT, `got ${read?.user}`);
+        check('the keychain returns the secret', read?.password === SECRET, 'the secret did not round-trip intact');
+
+        const fromKeychain = await resolveCredentials({ keychainService: service, credentialsFile: absentFile });
+        check(
+          'the loader prefers the keychain',
+          fromKeychain.passwordSource === target.name,
+          `got ${fromKeychain.passwordSource}`,
+        );
+
+        // The keychain must outrank a file that is also present.
+        const decoy = path.join(directory, 'decoy.json');
+        writeFileSync(decoy, JSON.stringify({ user: 'decoy@x.cn', password: 'decoy' }), 'utf8');
+        const decoyed = await resolveCredentials({ keychainService: service, credentialsFile: decoy });
+        check('the keychain outranks the file', decoyed.user === ACCOUNT, `got ${decoyed.user}`);
+      } finally {
+        check('the keychain item can be removed', target.remove() === true, 'remove reported failure');
+      }
+
+      const afterRemove = await resolveCredentials({ keychainService: service, credentialsFile: absentFile })
+        .then(() => 'resolved', (error) => error.message);
+      check(
+        'a removed keychain item is gone',
+        String(afterRemove).includes('not configured'),
+        `got ${afterRemove}`,
+      );
+
+      // Storing twice must leave exactly one item, which is what makes the
+      // service-only read and delete unambiguous. This is the macOS account
+      // change: -U would have kept the old item beside the new one.
+      const changed = keychainBackend({ service });
+      changed.write({ user: 'first@x.cn', password: 'first-secret' });
+      changed.write({ user: 'second@x.cn', password: 'second-secret' });
+      const replaced = changed.read();
+      check('a second store replaces rather than duplicates', replaced?.user === 'second@x.cn', `got ${replaced?.user}`);
+      check('the replacement removed the item', changed.remove() === true, 'remove reported failure');
+      const gone = changed.read();
+      check('removal left nothing behind', gone === undefined, `got ${JSON.stringify(gone)}`);
+    }
   }
 
   // ------------------------------------------------------- direct file write
