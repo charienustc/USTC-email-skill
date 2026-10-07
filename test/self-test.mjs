@@ -1049,6 +1049,140 @@ await checkAsync('downloadAttachments: --name and --index narrow the set', async
   assert.equal(offTheEnd.requested, 0);
 });
 
+// -------------------------------------------------- large and encoded parts
+//
+// A part is pulled in 1 MiB pieces, so anything above that exercises the join
+// between pieces. Random bytes are what make the test worth running: repetitive
+// content would hide an off-by-one in the offsets.
+
+/** Bytes that look random but repeat for a given seed, so a failure reproduces. */
+function pseudoRandom(length, seed) {
+  const out = Buffer.alloc(length);
+  let state = seed >>> 0;
+  for (let index = 0; index < length; index += 1) {
+    state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
+    out[index] = (state >>> 24) & 0xff;
+  }
+  return out;
+}
+
+/** How many bytes one FETCH pulls; must track CHUNK_BYTES in lib/attach.js. */
+const CHUNK = 1024 * 1024;
+
+/** A fixture whose section content is given verbatim rather than derived. */
+function rawFixture(uid, filename, payload, { encoding = 'BASE64', size } = {}) {
+  const quoted = imapQuoted(filename);
+  const structure = `("APPLICATION" "OCTET-STREAM" ("NAME" "${quoted}") NIL NIL "${encoding}" `
+    + `${size ?? payload.length} NIL ("ATTACHMENT" ("FILENAME" "${quoted}")) NIL NIL)`;
+  return {
+    uid,
+    seen: true,
+    size: 4096,
+    structure,
+    headers: makeHeaders([
+      'From: sender@example.edu.cn',
+      `Subject: attachment ${uid}`,
+      'Date: Tue, 6 Oct 2026 09:15:00 +0800',
+    ]),
+    sections: { 1: payload },
+  };
+}
+
+// Deliberately not a round number of chunks, and odd, so the final piece is short.
+const BIG_BYTES = pseudoRandom(3 * CHUNK + 12345, 20261006);
+
+// A quoted-printable escape split across the boundary: '=' is the last byte of
+// piece one, '4' and '1' are the first of piece two. Decoding piece by piece
+// would leave a stray '=' followed by a literal '41'.
+const QP_ESCAPE = `${'A'.repeat(CHUNK - 1)}=41${'B'.repeat(50)}`;
+const QP_ESCAPE_BYTES = Buffer.concat([
+  Buffer.from('A'.repeat(CHUNK - 1)),
+  Buffer.from([0x41]),
+  Buffer.from('B'.repeat(50)),
+]);
+
+// A soft line break split the same way: '=' then CR then LF. Decoding piece by
+// piece would keep all three bytes instead of dropping them.
+const QP_SOFT = `${'C'.repeat(CHUNK - 1)}=\r\n${'D'.repeat(50)}`;
+const QP_SOFT_BYTES = Buffer.concat([
+  Buffer.from('C'.repeat(CHUNK - 1)),
+  Buffer.from('D'.repeat(50)),
+]);
+
+const bigServer = await startFakeServer({
+  user: USER,
+  password: PASSWORD,
+  messages: [
+    rawFixture(401, 'big.bin', BIG_BYTES.toString('base64')),
+    rawFixture(402, 'escape.bin', QP_ESCAPE, { encoding: 'QUOTED-PRINTABLE' }),
+    rawFixture(403, 'soft.bin', QP_SOFT, { encoding: 'QUOTED-PRINTABLE' }),
+    // Declares more than the per-attachment cap, so it must be refused before a
+    // single byte is fetched.
+    rawFixture(404, 'huge.bin', '', { size: 200 * 1024 * 1024 }),
+  ],
+});
+const bigBase = { ...base, port: bigServer.port };
+
+await checkAsync('downloadAttachments: a part spanning several fetches is reassembled exactly', async () => {
+  const out = path.join(sandbox, 'big');
+  const value = await downloadAttachments({ ...bigBase, folder: 'INBOX', uid: 401, outDir: out });
+  assert.equal(value.saved.length, 1, JSON.stringify(value.skipped));
+  assert.equal(value.saved[0].bytes, BIG_BYTES.length);
+
+  const written = readFileSync(path.join(out, 'big.bin'));
+  assert.equal(written.length, BIG_BYTES.length);
+  assert.ok(written.equals(BIG_BYTES), 'the bytes changed somewhere between the pieces');
+
+  // Confirm the fixture really did cross a boundary, so this cannot pass by
+  // accident on a single fetch. The wire form spells the peek, hence BODY.PEEK.
+  const fetches = bigServer.state.commands.filter((line) => /BODY(?:\.PEEK)?\[1\]<\d+\.\d+>/.test(line));
+  assert.ok(fetches.length >= 4, `expected several piece fetches, saw ${fetches.length}`);
+  assert.ok(fetches.some((line) => /<0\.1048576>/.test(line)), 'first piece should start at 0');
+  assert.ok(fetches.some((line) => /<1048576\./.test(line)), 'a second piece should start at 1048576');
+});
+
+await checkAsync('downloadAttachments: a quoted-printable escape split across pieces still decodes', async () => {
+  const out = path.join(sandbox, 'qp');
+  const value = await downloadAttachments({ ...bigBase, folder: 'INBOX', uid: 402, outDir: out });
+  assert.equal(value.saved[0].bytes, QP_ESCAPE_BYTES.length);
+
+  const written = readFileSync(path.join(out, 'escape.bin'));
+  assert.ok(
+    written.equals(QP_ESCAPE_BYTES),
+    '=41 straddling the piece boundary was not decoded as one byte',
+  );
+  assert.equal(written[CHUNK - 1], 0x41, 'the escaped byte must land where the escape began');
+});
+
+await checkAsync('downloadAttachments: a soft line break split across pieces still collapses', async () => {
+  const out = path.join(sandbox, 'qp-soft');
+  const value = await downloadAttachments({ ...bigBase, folder: 'INBOX', uid: 403, outDir: out });
+  assert.equal(value.saved[0].bytes, QP_SOFT_BYTES.length);
+
+  const written = readFileSync(path.join(out, 'soft.bin'));
+  assert.ok(
+    written.equals(QP_SOFT_BYTES),
+    'a soft break straddling the piece boundary was not collapsed',
+  );
+  assert.equal(written.includes(0x0d), false, 'no carriage return may survive the decode');
+});
+
+await checkAsync('downloadAttachments: a part over the cap is refused before it is fetched', async () => {
+  const out = path.join(sandbox, 'over');
+  const value = await downloadAttachments({ ...bigBase, folder: 'INBOX', uid: 404, outDir: out });
+  assert.equal(value.saved.length, 0);
+  assert.equal(value.skipped.length, 1);
+  assert.match(value.skipped[0].reason, /larger than the 25 MiB limit/);
+
+  // The refusal has to happen before the body is pulled, or a hostile message
+  // could make the client download 200 MiB just to throw it away.
+  const fetches = bigServer.state.commands.filter((line) => /UID FETCH 404/.test(line));
+  assert.equal(fetches.length, 1, 'only the header fetch may touch this message');
+  assert.match(fetches[0], /HEADER|RFC822|BODYSTRUCTURE/i);
+  // The directory is created up front, so it exists but must stay empty.
+  assert.deepEqual(readdirSync(out), [], 'a refused part must not leave a file behind');
+});
+
 check('normalizeAttachArgs: validates the request before anything connects', () => {
   assert.equal(normalizeAttachArgs({ uid: 7 }).outDir, 'ustc-mail-attachments');
   assert.equal(normalizeAttachArgs({ uid: 7, outDir: 'x' }).outDir, 'x');
