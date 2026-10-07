@@ -57,7 +57,7 @@
 ```sh
 node bin/ustc-mail.mjs list --limit 20                            # 最新 20 封
 node bin/ustc-mail.mjs search --subject 账单 --since 2026-09-01    # 按主题和时间搜
-node bin/ustc-mail.mjs read 1691663063                            # 读某一封的正文
+node bin/ustc-mail.mjs read 100002                                # 读某一封的正文
 node bin/ustc-mail.mjs list --limit 20 --preview 200               # 带正文片段，汇总用
 ```
 

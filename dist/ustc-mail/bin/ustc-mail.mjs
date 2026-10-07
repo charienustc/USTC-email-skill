@@ -7,7 +7,7 @@
  *
  *   node bin/ustc-mail.mjs list --limit 20
  *   node bin/ustc-mail.mjs search --subject 开题 --since 2026-10-01
- *   node bin/ustc-mail.mjs read 1691663061
+ *   node bin/ustc-mail.mjs read 100002
  *   node bin/ustc-mail.mjs search --from gitlab --unread --json
  *
  * Credentials come from the environment or the local credential file; the

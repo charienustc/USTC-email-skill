@@ -39,14 +39,14 @@ node <skill>/bin/ustc-mail.mjs read <uid>
 | 最新 20 封 | `... list --limit 20` |
 | 只看未读 | `... list --unread --limit 50` |
 | 按主题找（中文可用） | `... search --subject 账单 --limit 10` |
-| 按发件人找 | `... search --from urp@ustc.edu.cn` |
+| 按发件人找 | `... search --from notifications@example.edu.cn` |
 | 按收件人找 | `... search --to someone@mail.ustc.edu.cn` |
 | 按时间找 | `... search --since 2026-10-01 --before 2026-11-01` |
 | 组合条件 | `... search --subject 日报 --since 2026-10-01 --limit 5` |
 | **带正文片段**（汇总必备） | `... list --limit 20 --preview 200` |
 | 指定文件夹 | 任一命令加 `--folder 已发送` |
-| 读某一封正文 | `... read 1691663061` |
-| 只要正文开头 | `... read 1691663061 --max-chars 800` |
+| 读某一封正文 | `... read 100002` |
+| 只要正文开头 | `... read 100002 --max-chars 800` |
 | 要精确字段 | 上面任一命令加 `--json` |
 
 - `search` **至少要给一个条件**（`--subject` / `--from` / `--to` / `--since` / `--before` / `--unread`），否则会报错。
@@ -123,11 +123,11 @@ node <skill>/bin/ustc-mail.mjs read <uid>
 
 ```
 Search: subject contains "账单", received on or after 01-Oct-2026
-INBOX: 1367 message(s) in the mailbox; 40 matched, newest 3 returned.
+INBOX: 1234 message(s) in the mailbox; 40 matched, newest 3 returned.
 0 of the returned messages are unread.
 Each message is followed by the first 200 characters of its text body.
-1. [read] 2026-10-05 08:58 | urp@ustc.edu.cn | 中国科大电子注册中心2026年09月用户【程岩】账单 | 3.9 KB | uid=1691663058
-   尊敬的程岩同学：您2026年9月的账单已生成，应缴金额 0.00 元……
+1. [read] 2026-10-05 08:58 | billing@example.edu.cn | 2026 年 09 月账单 | 3.9 KB | uid=100001
+   尊敬的客户：您 2026 年 9 月的账单已生成，应缴金额 0.00 元……
 ```
 
 片段是**压成一行的**（换行已折叠成空格），最多 `--preview` 个字符。
@@ -135,12 +135,12 @@ Each message is followed by the first 200 characters of its text body.
 `read` 输出信封 + 附件清单 + 正文：
 
 ```
-INBOX · uid=1691663063 · unread · 6.2 KB
+INBOX · uid=100002 · unread · 6.2 KB
 Date: 2026-10-06 12:00
-From: wangfeng (@wangfeng) <gitlab@ustc.edu.cn>
-To: cy18110504539@mail.ustc.edu.cn
-Subject: Re: USTC TokenWorks | 会话mermaid图渲染功能 (#2)
-Message-ID: <note_32623@git.ustc.edu.cn>
+From: someone <notifications@example.com>
+To: you@mail.ustc.edu.cn
+Subject: Re: 某项目 | 某功能 (#2)
+Message-ID: <note_12345@example.com>
 Attachments (2, not downloaded): 数据表.xls [application/vnd.ms-excel, 226.0 KB]; ...
 
 --- body (text/plain) ---
