@@ -98,14 +98,14 @@ node tools/build-skill.mjs --install <dir>   # 装到指定目录
 
 ```bash
 node test/self-test.mjs          # 99 项：纯函数 + 端到端（跑在假 IMAP 服务器上）
-node test/check-credentials.mjs  # 36 项：凭据层（数目随钥匙串是否可用略变，见下）
+node test/check-credentials.mjs  # 52 项：凭据层（数目随钥匙串是否可用略变，见下）
 node test/check-bundle.mjs       # 18 项：可移植包
 node test/check-schema.mjs "<path to dsh-tools/lib/index.js>"   # 可选：用 DSH 的校验器复核插件 schema
 ```
 
-合计 150 项以上。**改动后必须全绿**；`check-bundle.mjs` 会先构建再比对，所以它也能发现忘记重新构建的 `dist/`。
+合计 169 项。**改动后必须全绿**；`check-bundle.mjs` 会先构建再比对，所以它也能发现忘记重新构建的 `dist/`。
 
-`check-credentials.mjs` 的项数**取决于这台机器上钥匙串能不能真的用**：能往返就多跑几项真钥匙串断言（38），只有命令没有守护进程就转去验回退（34）。**这不代表测试被跳过**，代表它在当前环境里验了能验的东西；两种情况都会打印一行说明走到了哪条分支。
+`check-credentials.mjs` 的项数**取决于这台机器上钥匙串能不能真的用**：能往返就多跑几项真钥匙串断言（54），只有命令没有守护进程就转去验回退（50）。**这不代表测试被跳过**，代表它在当前环境里验了能验的东西；两种情况都会打印一行说明走到了哪条分支。
 
 覆盖范围与真机验证记录见 [docs/VERIFICATION.md](docs/VERIFICATION.md)。
 
@@ -126,7 +126,7 @@ node test/check-schema.mjs "<path to dsh-tools/lib/index.js>"   # 可选：用 D
 
 ## 7. 已知情况
 
-- **Linux 的钥匙串已在真机验证**（WSL Ubuntu 24.04，含真实 `gnome-keyring-daemon` 往返，38 项全过）。**macOS 仍未在真机验证**：开发机是 Windows，而 `security` 是 macOS 独有。用 `gh workflow run keychain-verification.yml` 或直接在一台 Mac 上跑 `node test/check-credentials.mjs`。见 [docs/BACKLOG.md](docs/BACKLOG.md)。
+- **三个平台的钥匙串都已在真机验证**：Windows 本机、Linux（WSL Ubuntu 24.04，含真实 `gnome-keyring-daemon` 往返）、macOS（`macos-latest` runner 上的真实 `security`）。macOS 第一轮就抓到 `security -w` 对非 ASCII 密码返回十六进制转储——**改钥匙串代码后用 `gh workflow run keychain-verification.yml` 复验**。见 [docs/VERIFICATION.md](docs/VERIFICATION.md)。
 - **钥匙串"可用"不等于"能用"**：`secret-tool` 常在没有 session bus 的 headless 机器上被装上。读会静默回退，**写会在失败时退回文件并说明原因**。新增凭据写入代码必须走 `storeCredentials`（`lib/credentials.js`），不要直接调 `backend.write`。
 - **macOS 保存凭据的一瞬间，授权码对进程列表可见**：`security add-generic-password` 只接受命令行参数。Linux 的 `secret-tool` 从 stdin 读，没有这个问题。
 - **`--preview` 的片段是压成一行的**，且只取 `preview × 6 + 1024` 字节（上限 64 KiB）的原始载荷，所以 HTML 邮件或高比例转义的邮件，片段可能短于请求的字符数。**片段只用于判断要不要细看，不能代替 `read`。**

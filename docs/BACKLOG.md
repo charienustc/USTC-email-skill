@@ -2,15 +2,17 @@
 
 更新于 2026-10-07。这里保留**尚未验收的行为**与**未做的功能**；"测试通过"不等于真机验收完成。
 
-## 待验收：macOS 的钥匙串
+## 待验收：macOS 钥匙串的残余情形
 
-**Linux 已经验过了**（见下）。macOS 在 CI 上跑过一轮，**立刻抓到一个真 bug**：
+**三个平台现在都真机验过了**：Windows（本机）、Linux（WSL + CI）、macOS（CI）。macOS 第一轮就抓到一个真 bug：
 
 > `security find-generic-password -w` 对**含非 ASCII 字节**的密码打印的是**十六进制转储**，不是文本。存进去的 JSON 里只要有中文授权码，读回来就 `JSON.parse` 失败。
 
 USTC 的授权码通常全是 ASCII，所以这个缺陷只在非 ASCII 时出现——**正因如此它一直没被发现**，直到 macOS runner 第一次把它跑出来。现在存的是 base64（对任何输入都是纯 ASCII），旧格式仍能读回。这正是"必须真机验证"的例证：单元测试和 Linux 都证明不了 `security` 的输出格式。
 
-尚未验证的：`add-generic-password` / `delete-generic-password` 的退出码与错误文本；`commandExists('security', ['help'])` 是否会打开分页器；**不弹 GUI 授权框时能否在无人值守环境完成写入**（CI 里是先 `security unlock-keychain` 才跑的，所以"锁着的钥匙串"这条路径没有被覆盖）。
+修完之后 macOS 的真实往返全部通过，包括非 ASCII 密码、加载器偏好、以及"第二次写入是替换而非新增"。
+
+**仍然没覆盖的**：**锁着的钥匙串**（CI 里先跑了 `security unlock-keychain`，所以这条路径没验过）；`commandExists('security', ['help'])` 是否会打开分页器；无人值守环境下 `security` 的 GUI 授权框行为。
 
 验收方法：`.github/workflows/keychain-verification.yml` 的 `macos` job（在 Actions 页手动触发），或在一台 Mac 上跑 `node test/check-credentials.mjs`。
 
