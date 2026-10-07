@@ -43,6 +43,8 @@ node <skill>/bin/ustc-mail.mjs attach <uid> --out ./attachments
 | 按主题找（中文可用） | `... search --subject 账单 --limit 10` |
 | 按发件人找 | `... search --from notifications@example.edu.cn` |
 | 按收件人找 | `... search --to someone@mail.ustc.edu.cn` |
+| **正文里提到某词** | `... search --body 报销 --limit 10` |
+| **不记得在哪，到处找** | `... search --anywhere 报销 --limit 10` |
 | 按时间找 | `... search --since 2026-10-01 --before 2026-11-01` |
 | 组合条件 | `... search --subject 日报 --since 2026-10-01 --limit 5` |
 | **带正文片段**（汇总必备） | `... list --limit 20 --preview 200` |
@@ -54,8 +56,11 @@ node <skill>/bin/ustc-mail.mjs attach <uid> --out ./attachments
 | 只存某一个附件 | `... attach 100002 --name 数据表.xls` |
 | 要精确字段 | 上面任一命令加 `--json` |
 
-- `search` **至少要给一个条件**（`--subject` / `--from` / `--to` / `--since` / `--before` / `--unread`），否则会报错。
+- `search` **至少要给一个条件**（`--subject` / `--from` / `--to` / `--body` / `--anywhere` / `--since` / `--before` / `--unread`），否则会报错。
 - 搜索文本是**子串匹配**，不是精确相等；中文可以直接写，会用 `CHARSET UTF-8` 发给服务器。
+- **`--anywhere` 是"这个词出现在主题或正文里"**，一次搜索搞定两处。用户说「找一下提到 XX 的邮件」而没说在哪时，**用它，不要分别搜两次，也不要默认只搜主题**。
+- `--body` 只看正文；`--anywhere` 只看主题+正文。两者都是**子串匹配**，不是语义检索——搜"报销"找不到只写了"报账"的邮件。
+- 正文搜索**不慢**：实测和搜头部同一量级（几十毫秒），可以放心用。**不要试图用"只搜主题"来省时间。**
 - `--since` / `--before` 按**收到日期**（服务器内部日期）算，`--before` 是**不含**当天。格式 `YYYY-MM-DD`。
 - `--limit` 取值 1–100，默认 20。
 - `--preview` 取值 0–600，默认 0。给 `list` / `search` 的每封附上正文开头（压成一行）。**它在同一条连接里完成**，是汇总时唯一该用的粗筛手段。

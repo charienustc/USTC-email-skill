@@ -20,7 +20,8 @@
 | | 能力 | 说明 |
 | --- | --- | --- |
 | 📬 | **列出邮件** | 最新 N 封的信封信息：发件人、主题、日期、已读状态、大小、有无附件 |
-| 🔎 | **搜索** | 按主题、发件人、收件人、日期区间、未读筛选；中文直接用 `CHARSET UTF-8` 发给服务器 |
+| 🔎 | **搜索** | 按主题、发件人、收件人、**正文**、日期区间、未读筛选；中文直接用 `CHARSET UTF-8` 发给服务器 |
+| 📝 | **到处找** | `--anywhere` 一次搜「主题或正文」，不用先猜词在哪 |
 | 📖 | **读取正文** | 按 `uid` 读出正文与附件清单；HTML-only 的邮件自动转纯文本 |
 | 📚 | **一次读多封** | 最多 20 个 `uid` 一条连接读完；找不到的那个单独列出，不影响其余 |
 | ⚡ | **正文片段** | `--preview` 给整个列表附上每封的正文开头，**在同一条连接里完成**，用来做汇总 |
@@ -59,6 +60,7 @@
 ```sh
 node bin/ustc-mail.mjs list --limit 20                            # 最新 20 封
 node bin/ustc-mail.mjs search --subject 账单 --since 2026-09-01    # 按主题和时间搜
+node bin/ustc-mail.mjs search --anywhere 报销                      # 主题或正文里提到它
 node bin/ustc-mail.mjs read 100002                                # 读某一封的正文
 node bin/ustc-mail.mjs read 100001 100002 100003                  # 一次读多封，一条连接
 node bin/ustc-mail.mjs list --limit 20 --preview 200               # 带正文片段，汇总用
@@ -68,7 +70,7 @@ node bin/ustc-mail.mjs attach 100002 --out ./attachments           # 保存附�
 | 命令 | 参数 |
 | --- | --- |
 | `list` | `--limit`（1–100）、`--unread`、`--preview`（0–600） |
-| `search` | `--subject` `--from` `--to` `--since` `--before` `--unread`，**至少给一个** |
+| `search` | `--subject` `--from` `--to` `--body` `--anywhere` `--since` `--before` `--unread`，**至少给一个** |
 | `read <uid>...` | 最多 20 个 uid；`--max-chars`（500–200000，单封默认 20000，多封默认 2000） |
 | `attach <uid>` | `--out`（默认 `ustc-mail-attachments`）、`--name`、`--index` |
 

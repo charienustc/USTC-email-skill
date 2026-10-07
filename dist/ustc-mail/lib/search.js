@@ -58,6 +58,21 @@ export function buildSearchCommand(request) {
   if (request.subject !== undefined) add('SUBJECT', request.subject);
   if (request.from !== undefined) add('FROM', request.from);
   if (request.to !== undefined) add('TO', request.to);
+  if (request.body !== undefined) add('BODY', request.body);
+
+  // "Anywhere" is subject-or-body. OR takes exactly two keys, and the
+  // parenthesised form is not needed because a bare key ends at the next key.
+  //
+  // This is deliberately NOT the TEXT key. Measured against Coremail, TEXT
+  // costs 5-6 seconds against 20-140 ms for BODY, is not cached between
+  // identical calls, and does not even agree with the union of SUBJECT and
+  // BODY: for one term it returned 36 where the union was 48, missing 14 and
+  // adding 2. Being both slower and less complete, TEXT has no use here.
+  if (request.anywhere !== undefined) {
+    tokens.push('OR', 'SUBJECT', imapString(request.anywhere), 'BODY', imapString(request.anywhere));
+    terms.push(request.anywhere);
+  }
+
   if (request.since !== undefined) tokens.push('SINCE', request.since);
   if (request.before !== undefined) tokens.push('BEFORE', request.before);
   if (request.unreadOnly) tokens.push('UNSEEN');
@@ -76,6 +91,8 @@ export function describeQuery(request) {
   if (request.subject !== undefined) parts.push(`subject contains "${request.subject}"`);
   if (request.from !== undefined) parts.push(`from contains "${request.from}"`);
   if (request.to !== undefined) parts.push(`to contains "${request.to}"`);
+  if (request.body !== undefined) parts.push(`body contains "${request.body}"`);
+  if (request.anywhere !== undefined) parts.push(`subject or body contains "${request.anywhere}"`);
   if (request.since !== undefined) parts.push(`received on or after ${request.since}`);
   if (request.before !== undefined) parts.push(`received before ${request.before}`);
   if (request.unreadOnly) parts.push('unread only');
@@ -115,13 +132,18 @@ export function normalizeSearchArgs(args) {
   const subject = text('subject');
   const from = text('from');
   const to = text('to');
+  const body = text('body');
+  const anywhere = text('anywhere');
   const since = date('since');
   const before = date('before');
   const unreadOnly = input.unreadOnly === true;
 
   if (subject === undefined && from === undefined && to === undefined
+    && body === undefined && anywhere === undefined
     && since === undefined && before === undefined && !unreadOnly) {
-    throw new Error('Give at least one of "subject", "from", "to", "since", "before", or "unreadOnly".');
+    throw new Error(
+      'Give at least one of "subject", "from", "to", "body", "anywhere", "since", "before", or "unreadOnly".',
+    );
   }
 
   return {
@@ -131,6 +153,8 @@ export function normalizeSearchArgs(args) {
     subject,
     from,
     to,
+    body,
+    anywhere,
     since,
     before,
     unreadOnly,

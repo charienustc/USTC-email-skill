@@ -47,6 +47,10 @@ Options:
   --subject <text>           search: substring of the subject
   --from <text>              search: substring of the sender
   --to <text>                search: substring of a recipient
+  --body <text>              search: substring of the message body
+  --anywhere <text>          search: substring of the subject OR the body, in
+                             one search. Use this for "find the mail that
+                             mentions X" when you do not know where X appears.
   --since <YYYY-MM-DD>       search: received on or after this date
   --before <YYYY-MM-DD>      search: received before this date
   --max-chars <n>            read: body characters per message, 500-200000.
@@ -62,7 +66,9 @@ Options:
   --password-env <name>      environment variable holding the password
   -h, --help                 show this help
 
-search needs at least one of --subject, --from, --to, --since, --before, --unread.
+search needs at least one of --subject, --from, --to, --body, --anywhere, --since, --before, --unread.
+--body and --anywhere are substring matches over the message body, not a full-text
+index: they are as fast as a header search on Coremail (tens of milliseconds).
 read takes at most 20 uids and opens one connection for all of them.
 attach is the only command that writes anything.
 
@@ -125,6 +131,8 @@ function parseArgs(argv) {
     else if (arg === '--subject') options.search.subject = next();
     else if (arg === '--from') options.search.from = next();
     else if (arg === '--to') options.search.to = next();
+    else if (arg === '--body') options.search.body = next();
+    else if (arg === '--anywhere') options.search.anywhere = next();
     else if (arg === '--since') options.search.since = next();
     else if (arg === '--before') options.search.before = next();
     else if (arg === '--unread') options.unreadOnly = true;

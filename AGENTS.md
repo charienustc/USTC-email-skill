@@ -121,6 +121,7 @@ node test/check-schema.mjs "<path to dsh-tools/lib/index.js>"   # 可选：用 D
 - **不要给插件加会写文件的工具**。`attach` 刻意只在 CLI / 技能形态提供：写文件应当由命令行加显式目标目录来做，而不是由一个本来只读的工具集悄悄落盘。`test/self-test.mjs` 里 `plugin: nothing in the tool set writes` 就是守这条的。
 - **不许关掉 TLS 校验**。`rejectUnauthorized: true` 必须放在配置展开之后；自定义 CA 可以传，校验不能关。
 - **不许把凭据写进命令行参数**（进程列表可见）。macOS 的 `security` 命令有这个固有妥协，已记录在审计里；新增代码不得再引入同类问题。
+- **搜索里永远不要发 `TEXT` 检索键**。实测差异极大：`BODY` 与搜头部同量级（20–140 ms），`TEXT` 要 **4.7–6 秒且不缓存**；更糟的是**结果不一致**——同一个词，`SUBJECT`∪`BODY` 是 48 封，`TEXT` 只返回 36 封，**漏掉 14 封**、另有 2 封在并集之外。要"到处搜"就用 `OR SUBJECT x BODY x`（实测 48 ms，结果**精确等于**并集）。`test/self-test.mjs` 里 `never TEXT` 那组断言就是守这条的。
 - **推送、打标签、改仓库设置前先征得负责人同意。**
 - 改动涉及安全面时，同步更新 [docs/SECURITY-AUDIT-2026-10-06.md](docs/SECURITY-AUDIT-2026-10-06.md)。
 

@@ -300,7 +300,7 @@ check('plugin: each tool exposes exactly the documented arguments', () => {
   );
   assert.deepEqual(
     Object.keys(registeredTool({}, SEARCH_TOOL_NAME).parameters.properties).sort(),
-    ['before', 'folder', 'from', 'limit', 'preview', 'since', 'subject', 'to', 'unreadOnly'],
+    ['anywhere', 'before', 'body', 'folder', 'from', 'limit', 'preview', 'since', 'subject', 'to', 'unreadOnly'],
   );
   assert.deepEqual(
     Object.keys(registeredTool({}, READ_TOOL_NAME).parameters.properties).sort(),
@@ -1244,12 +1244,64 @@ check('buildSearchCommand: quotes ASCII terms, adds CHARSET only for non-ASCII',
   assert.deepEqual(buildSearchCommand({}), ['ALL']);
 });
 
+check('buildSearchCommand: body and anywhere, and never TEXT', () => {
+  // Body search is a plain BODY key.
+  assert.deepEqual(buildSearchCommand({ body: 'invoice' }), ['BODY', '"invoice"']);
+
+  // "Anywhere" is one OR over TWO keys, which is what IMAP's OR takes. Getting
+  // this shape wrong is silently accepted by some servers and not others.
+  assert.deepEqual(
+    buildSearchCommand({ anywhere: 'invoice' }),
+    ['OR', 'SUBJECT', '"invoice"', 'BODY', '"invoice"'],
+  );
+
+  // The term has to be repeated as a literal for both branches, or the second
+  // branch searches for nothing.
+  const tokens = buildSearchCommand({ anywhere: '报销', since: '01-Sep-2026' });
+  assert.deepEqual(tokens.slice(0, 2), ['CHARSET', 'UTF-8']);
+  assert.deepEqual(tokens.slice(2, 4), ['OR', 'SUBJECT']);
+  assert.equal(Buffer.from(tokens[4].literal).toString('utf8'), '报销');
+  assert.equal(tokens[5], 'BODY');
+  assert.equal(Buffer.from(tokens[6].literal).toString('utf8'), '报销');
+  assert.deepEqual(tokens.slice(7), ['SINCE', '01-Sep-2026']);
+
+  // TEXT is deliberately absent. Against Coremail it costs seconds rather than
+  // milliseconds and returns a different set than SUBJECT-or-BODY, so nothing
+  // in this client may emit it.
+  for (const request of [{ body: 'x' }, { anywhere: 'x' }, { subject: 'x', body: 'y' }]) {
+    assert.equal(
+      buildSearchCommand(request).includes('TEXT'),
+      false,
+      'TEXT must never be sent',
+    );
+  }
+
+  // A body term ANDs with the other keys rather than replacing them.
+  const combined = buildSearchCommand({ subject: '日报', body: '账单' });
+  assert.deepEqual(combined.slice(0, 3), ['CHARSET', 'UTF-8', 'SUBJECT']);
+  assert.equal(combined[4], 'BODY');
+});
+
+check('describeQuery: names the body criteria in words', () => {
+  assert.equal(describeQuery({ body: '报销' }), 'body contains "报销"');
+  assert.equal(describeQuery({ anywhere: '报销' }), 'subject or body contains "报销"');
+  assert.equal(
+    describeQuery({ anywhere: '报销', since: '01-Sep-2026' }),
+    'subject or body contains "报销", received on or after 01-Sep-2026',
+  );
+});
+
 check('normalizeSearchArgs: requires a criterion and validates values', () => {
   assert.throws(() => normalizeSearchArgs({}), /at least one/);
   assert.throws(() => normalizeSearchArgs({ subject: '   ' }), /must be a non-empty string/);
   assert.throws(() => normalizeSearchArgs({ from: 'a\nb' }), /must not contain line breaks/);
   assert.throws(() => normalizeSearchArgs({ since: 'yesterday' }), /calendar date/);
   assert.throws(() => normalizeSearchArgs({ subject: 'x', limit: 101 }), /"limit" must be an integer/);
+  // The new body criteria count as criteria for the "give me at least one" rule.
+  assert.throws(() => normalizeSearchArgs({ body: '' }), /must be a non-empty string/);
+  assert.throws(() => normalizeSearchArgs({ anywhere: '  ' }), /must be a non-empty string/);
+  assert.equal(normalizeSearchArgs({ body: 'x' }).body, 'x');
+  assert.equal(normalizeSearchArgs({ anywhere: 'x' }).anywhere, 'x');
   assert.deepEqual(normalizeSearchArgs({ unreadOnly: true }), {
     folder: 'INBOX',
     limit: 20,
@@ -1257,6 +1309,8 @@ check('normalizeSearchArgs: requires a criterion and validates values', () => {
     subject: undefined,
     from: undefined,
     to: undefined,
+    body: undefined,
+    anywhere: undefined,
     since: undefined,
     before: undefined,
     unreadOnly: true,
