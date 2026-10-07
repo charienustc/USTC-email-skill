@@ -4,7 +4,9 @@
 
 <div align="center">
 
-[![平台](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-034ea1?style=flat-square)](#安装) [![Node.js](https://img.shields.io/badge/Node.js-%E2%89%A5%2018-4169e1?style=flat-square)](https://nodejs.org/) [![依赖](https://img.shields.io/badge/dependencies-0-3DA66B?style=flat-square)](#能做什么) [![测试](https://img.shields.io/badge/tests-119%20passing-3DA66B?style=flat-square)](AGENTS.md#5-测试) [![License: MIT](https://img.shields.io/badge/license-MIT-3DA66B?style=flat-square)](LICENSE)
+**简体中文** | [English](README_EN.md)
+
+[![平台](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-034ea1?style=flat-square)](#安装) [![Node.js](https://img.shields.io/badge/Node.js-%E2%89%A5%2018-4169e1?style=flat-square)](https://nodejs.org/) [![依赖](https://img.shields.io/badge/dependencies-0-3DA66B?style=flat-square)](#能做什么) [![测试](https://img.shields.io/badge/tests-171%20passing-3DA66B?style=flat-square)](AGENTS.md#5-测试) [![License: MIT](https://img.shields.io/badge/license-MIT-3DA66B?style=flat-square)](LICENSE)
 
 [安装](#安装) · [用法](#用法) · [凭据](#凭据) · [工作方式](#工作方式) · [文档](#文档) · [参与开发](AGENTS.md) · [问题反馈](https://github.com/charienustc/USTC-email-skill/issues/new)
 
@@ -13,7 +15,7 @@
 只读访问中国科学技术大学邮箱（`mail.ustc.edu.cn`）的 agent 技能。一份可直接复制到任何 agent 的 `SKILL.md` 加一套零第三方依赖的 IMAP 实现，Windows、macOS、Linux 通用。
 
 > [!NOTE]
-> 全程只读：邮箱用 `EXAMINE` 打开、正文用 `BODY.PEEK` 取，代码里没有 STORE、COPY、EXPUNGE、APPEND，也没有 SMTP。**不会把邮件标记为已读，不会删除，不会发送，不下载附件。** 附件只列文件名、类型和大小。
+> 全程只读：邮箱用 `EXAMINE` 打开、正文用 `BODY.PEEK` 取，代码里没有 STORE、COPY、EXPUNGE、APPEND，也没有 SMTP。**不会把邮件标记为已读，不会删除，不会发送，不会从邮箱里移除或改动附件。** 唯一的写操作是 `attach` 把附件取出来写到**你本地的目录**——邮箱那一侧一个字都不动。
 
 ## 能做什么
 

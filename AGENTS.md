@@ -21,7 +21,8 @@ USTC Email Skill 是一个只读访问中国科大邮箱的 agent 技能：一�
 
 | 路径 | 内容 |
 | --- | --- |
-| `skill/SKILL.md` | **技能源文件**。位置无关，用 `<skill>` 相对定位；这是 agent 真正读的文档 |
+| `skill/SKILL.md` | **技能源文件**。位置无关，用 `<skill>` 相对定位；这是 agent 真正读的文档。**中文** |
+| `README.md` `README_EN.md` | 面向使用者的两份 README，**中英一对，必须同时改**。仓库默认展示中文版 |
 | `bin/ustc-mail.mjs` | 命令行入口：`list` / `search` / `read` / `attach`，参数解析与渲染选择 |
 | `bin/setup-credentials.mjs` | 跨平台凭据录入：关回显、保存前校验账号、保存后验证登录 |
 | `bin/credential-store.ps1` | Windows 钥匙串后端（`CredRead`/`CredWrite` 的 P/Invoke），**纯 ASCII** |
